@@ -10,9 +10,6 @@ let settings = { temperature: '', top_p: '', stop: '', tools: true, effort: '', 
 let attachments = [];
 let active = null;
 let busy = false;
-const FS_SUPPORTED = typeof window.showDirectoryPicker === 'function';
-let outputDir = null;
-let folderGranted = false;
 let providerConfig = { baseUrl: '', apiKey: '' };
 let connection = { ready: false, source: null, baseUrl: null };
 let workspace = { ready: false, root: null };
@@ -265,14 +262,12 @@ function renderText(target, text) {
       copy.title = 'Copy this code block';
       copy.onclick = async () => { try { await navigator.clipboard.writeText(codeText); copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy', 1200); } catch { notice('Select the code and copy it manually.'); } };
       bar.append(lang, copy);
-      if (FS_SUPPORTED) {
-        const save = document.createElement('button');
-        save.type = 'button'; save.className = 'code-tool code-save';
-        save.textContent = name ? `💾 Save as ${name}` : '💾 Save';
-        save.title = 'Save this code into your chosen folder';
-        save.onclick = () => saveCodeBlock(codeText, info);
-        bar.append(save);
-      }
+      const save = document.createElement('button');
+      save.type = 'button'; save.className = 'code-tool code-save';
+      save.textContent = name ? `💾 Save as ${name}` : '💾 Save';
+      save.title = 'Save this code into your project folder';
+      save.onclick = () => saveCodeBlock(codeText, info);
+      bar.append(save);
       block.append(bar, pre);
       target.append(block);
     } else target.append(document.createTextNode(part));
@@ -414,99 +409,35 @@ function renderAttachments() {
   });
 }
 
-// ---- saving code to a folder ----
+// ---- saving code into the project folder ----
 
-let folderDB = null;
-function openFolderDB() {
-  if (folderDB) return Promise.resolve(folderDB);
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('riverchat.files', 1);
-    request.onupgradeneeded = () => request.result.createObjectStore('kv');
-    request.onsuccess = () => { folderDB = request.result; resolve(folderDB); };
-    request.onerror = () => reject(request.error);
-  });
-}
-async function folderStore(mode, action) {
-  const db = await openFolderDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('kv', mode);
-    const request = action(tx.objectStore('kv'));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-const folderGet = key => folderStore('readonly', store => store.get(key));
-const folderSet = (key, value) => folderStore('readwrite', store => store.put(value, key));
-
-function updateFolderUI() {
-  if (!FS_SUPPORTED) return;
-  $('folderBox').hidden = false;
-  if (!outputDir) {
-    $('folderBtn').textContent = '📁 Choose folder for saved code…';
-    $('folderHint').textContent = 'Save buttons under code blocks write files there.';
-  } else if (folderGranted) {
-    $('folderBtn').textContent = '📁 ' + outputDir.name + ' · change';
-    $('folderHint').textContent = 'Code files you save go into this folder.';
-  } else {
-    $('folderBtn').textContent = '📁 Re-allow "' + outputDir.name + '"';
-    $('folderHint').textContent = 'The browser needs one click to re-open the folder.';
-  }
-}
-async function pickFolder() {
-  try {
-    const handle = await window.showDirectoryPicker({ id: 'riverchat-code', mode: 'readwrite' });
-    outputDir = handle; folderGranted = true;
-    folderSet('outputDir', handle).catch(() => { /* remember for next time only */ });
-    updateFolderUI();
-    notice('Code files will be saved to the "' + handle.name + '" folder.');
-    return true;
-  } catch (e) {
-    if (e?.name !== 'AbortError') notice('Could not use that folder: ' + (e?.message || e?.name || 'unknown error'));
-    return false;
-  }
-}
-async function ensureDirAccess() {
-  if (!FS_SUPPORTED) throw new Error('Saving to a folder needs Chrome or Edge.');
-  if (!outputDir && !(await pickFolder())) throw new Error('Pick a folder to save code into.');
-  if (!folderGranted) {
-    let granted = false;
-    try { granted = (await outputDir.requestPermission({ mode: 'readwrite' })) === 'granted'; } catch { /* denied */ }
-    folderGranted = granted;
-    updateFolderUI();
-    if (!granted) throw new Error('Folder access was not granted. Pick the folder again.');
-  }
-  return outputDir;
-}
-async function writeCodeFile(dir, relPath, content) {
-  const segments = relPath.split('/');
-  const fileName = segments.pop();
-  let target = dir;
-  for (const segment of segments) target = await target.getDirectoryHandle(segment, { create: true });
-  let exists = false;
-  try { await target.getFileHandle(fileName); exists = true; } catch { /* new file */ }
-  if (exists && !confirm('"' + relPath + '" already exists in "' + dir.name + '". Overwrite it?')) return null;
-  const file = await target.getFileHandle(fileName, { create: true });
-  const writable = await file.createWritable();
-  await writable.write(content);
-  await writable.close();
-  return relPath;
-}
 async function saveCodeBlock(codeText, info) {
-  try {
-    const dir = await ensureDirAccess();
-    let relPath = sanitizeRelPath(fenceTarget(info));
-    if (!relPath) {
-      const language = String(info || '').trim().split(/\s+/)[0] || '';
-      const entered = prompt('File name for this code (subfolders like src/app.js are allowed):', 'snippet.' + languageExt(language));
-      relPath = entered ? sanitizeRelPath(entered) : null;
-      if (entered && !relPath) { notice('That file name is not valid. Use letters, numbers, dots, dashes and / for subfolders.'); return; }
-      if (!relPath) return;
-    }
-    const saved = await writeCodeFile(dir, relPath, codeText);
-    if (saved) notice('Saved "' + saved + '" into the "' + dir.name + '" folder.');
-  } catch (e) {
-    if (e?.name !== 'AbortError') notice(e?.message || 'Could not save the file.');
+  if (!workspace.ready) {
+    notice('Set your project folder first: sidebar → 📁 Project folder, paste the path, then Save writes files there.');
+    $('projectBox').open = true;
+    $('projectPath').focus();
+    return;
   }
+  let relPath = sanitizeRelPath(fenceTarget(info));
+  if (!relPath) {
+    const language = String(info || '').trim().split(/\s+/)[0] || '';
+    const entered = prompt('File name for this code (subfolders like src/app.js are allowed):', 'snippet.' + languageExt(language));
+    relPath = entered ? sanitizeRelPath(entered) : null;
+    if (entered && !relPath) { notice('That file name is not valid. Use letters, numbers, dots, dashes and / for subfolders.'); return; }
+    if (!relPath) return;
+  }
+  try {
+    const send = overwrite => fetch('/api/workspace/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: relPath, content: codeText, overwrite }) });
+    let response = await send(false);
+    let data = await response.json().catch(() => ({}));
+    if (response.status === 409 && data.exists) {
+      if (!confirm('"' + relPath + '" already exists in your project folder. Overwrite it?')) return;
+      response = await send(true);
+      data = await response.json().catch(() => ({}));
+    }
+    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+    notice('Saved "' + data.saved + '" into your project folder.');
+  } catch (e) { notice(e?.message || 'Could not save the file.'); }
 }
 
 // ---- model + settings wiring ----
@@ -636,10 +567,10 @@ document.addEventListener('scroll', () => { if (!$('modelMenu').hidden) position
 // ---- project folder (coding agent) ----
 
 function updateWorkspaceUI() {
-  $('projectUse').textContent = workspace.ready ? '✓ Folder in use · change or clear' : '🗂 Use this folder';
+  $('projectUse').textContent = workspace.ready ? '✓ Folder in use · change or clear' : '📁 Use this folder';
   $('projectHint').textContent = workspace.ready
-    ? 'Agent mode is ON for ' + workspace.root + '. The AI can read files there; every change is shown as a diff and needs your approval.'
-    : 'Optional: paste the full path of your code project. The AI can then read files and propose edits — you approve every change. Click with an empty field to turn it off.';
+    ? 'Agent mode is ON for ' + workspace.root + '. The AI can read files there, every change needs your approval, and 💾 Save writes into this folder.'
+    : 'Paste the full path of your code project. The AI can read files there and propose edits (you approve every change), and 💾 Save buttons write into this folder. Empty + click turns it off.';
   updateModelLine();
 }
 $('projectUse').onclick = async () => {
@@ -862,26 +793,6 @@ function autoGrow() { const el = $('prompt'); el.style.height = 'auto'; el.style
 $('prompt').addEventListener('input', autoGrow);
 for (const button of document.querySelectorAll('.suggestions button')) button.onclick = () => { $('prompt').value = button.dataset.prompt || ''; autoGrow(); $('prompt').focus(); };
 
-if (FS_SUPPORTED) {
-  $('folderBtn').onclick = async () => {
-    if (outputDir && !folderGranted) {
-      let granted = false;
-      try { granted = (await outputDir.requestPermission({ mode: 'readwrite' })) === 'granted'; } catch { /* denied */ }
-      if (granted) { folderGranted = true; updateFolderUI(); notice('Writing to "' + outputDir.name + '" is allowed again.'); return; }
-    }
-    pickFolder();
-  };
-  (async () => {
-    try {
-      const stored = await folderGet('outputDir');
-      if (stored) {
-        outputDir = stored;
-        try { folderGranted = (await stored.queryPermission({ mode: 'readwrite' })) === 'granted'; } catch { folderGranted = false; }
-      }
-    } catch { /* no stored folder */ }
-    updateFolderUI();
-  })();
-}
 fetch('/api/config').then(readJSON).then(async data => {
   pricing = data.pricing ?? {};
   connection = { ready: data.configured, source: data.source ?? null, baseUrl: data.baseUrl ?? null };

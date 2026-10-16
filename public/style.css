@@ -61,7 +61,7 @@ aside{
 .new:hover{border-color:rgba(255,198,105,.45);transform:translateY(-1px);box-shadow:var(--glow-amber)}
 
 .chats-wrap{display:flex;flex-direction:column;min-height:70px;flex:1 1 auto;margin:10px 0 4px}
-.chats-wrap>label,.settings label,.folder-box>label{display:block;font-size:10px;letter-spacing:1.9px;font-weight:700;color:var(--muted);margin:14px 0 8px}
+.chats-wrap>label,.settings label{display:block;font-size:10px;letter-spacing:1.9px;font-weight:700;color:var(--muted);margin:14px 0 8px}
 #chats{list-style:none;margin:0;padding:0 2px 0 0;overflow-y:auto;flex:1;min-height:60px}
 #chats li{display:flex;align-items:center;gap:8px;border:1px solid transparent;border-radius:11px;padding:9px 10px;cursor:pointer;margin-bottom:3px;transition:background .15s,border-color .15s}
 #chats li:hover{background:rgba(255,255,255,.05)}
@@ -110,8 +110,6 @@ select:focus,input[type=number]:focus,input[type=text]:focus{outline:none;border
 .text-button:hover{color:#9be8dd}
 .hint{color:var(--muted);font-size:11px;margin:8px 0 0}
 
-.folder-box{flex:none;border-top:1px solid var(--line);margin-top:4px;padding-top:2px}
-.folder-box .text-button{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sidebar-bottom{flex:none;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px;margin-top:8px}
 .sidebar-bottom p{font-size:11px;margin:12px 0;line-height:1.55}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--teal);margin-right:7px;box-shadow:0 0 10px rgba(111,216,201,.8)}

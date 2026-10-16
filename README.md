@@ -31,11 +31,11 @@ Keep the terminal running. Ctrl+C stops the server. Do not use VS Code Live Serv
 | Vision | Attach up to 4 PNG/JPEG images per message with the **🖼 Images** button, paste, or drag-and-drop. Images are downscaled in your browser to 1600 px JPEG before sending. |
 | Reasoning | Reasoning models stream their thinking into a collapsible **Thinking** panel. Set **Reasoning effort** per model (`DeepSeek`: none/high/max; `GLM`: low/high/max). |
 | Tools | With **Allow tools** on, the model can call a safe calculator, current time, and Wikipedia lookup. Each call is shown inline with its result; the loop stops after 8 rounds. |
-| Coding agent (project folder) | Under **🗂 Project folder**, paste the full path of your project (e.g. `C:\projects\my-app`). The AI then gets file tools: `list_files`, `read_file` and `search_files` run automatically, while `write_file` and `edit_file` pause and show a **diff card with ✓ Apply / ✗ Reject** — nothing is written until you approve. All paths are sandboxed to that folder. |
+| Coding agent (project folder) | Under **📁 Project folder**, paste the full path of your project (e.g. `C:\projects\my-app`). The AI then gets file tools: `list_files`, `read_file` and `search_files` run automatically, while `write_file` and `edit_file` pause and show a **diff card with ✓ Apply / ✗ Reject** — nothing is written until you approve. All paths are sandboxed to that folder. |
 | Token & cost meter | Every reply shows input/output/reasoning/cached tokens and an estimated cost using River's published per-model prices. |
 | Sampling controls | Temperature (0–2), top P (0–1), stop sequences (up to 4) and a System prompt in **Model & settings**. |
 | Model switching | The model picker is **searchable** — click it and type to filter (full IDs shown for `free/`-style names). Switching models keeps the conversation; use **＋ New conversation** for an independent comparison. The selected model, token limit and tool state are shown under the chat box. **↻ Refresh available models** queries your provider. |
-| Save code to a folder | In Chrome/Edge, choose a folder once; the **💾 Save** button under each code block writes that file straight into the folder (subfolders like `src/app.js` supported; overwriting asks first). |
+| Save code to your project folder | The **💾 Save** button under each code block writes that file into your **📁 Project folder** (subfolders like `src/app.js` supported; overwriting asks first). The server does the writing, so it works in every browser. |
 
 ## First tests
 
@@ -75,19 +75,19 @@ Notes that apply to both:
 - Chat, streaming, vision and tool calling all use the standard format. If the provider rejects `stream_options`, the server retries once without it.
 - River-specific extras (cosmetic or inert elsewhere): the cost meter only shows costs for River model IDs, reasoning-effort presets only appear for models whose name contains `deepseek` or `glm`, and the console link in the sidebar can be edited in `public/index.html`.
 
-## Save code to a folder (optional)
+## Save code to your project folder
 
-When a reply contains code, each code block gets a **💾 Save** button. Click it once, choose any folder on your computer, and the file is written straight into it. Subfolders are supported (`src/utils.js` creates the `src` folder), and if the model names the file in the fence (a fence starting with `js app.js`, or `title=app.js`) the button shows that name — otherwise you are asked for one. Overwriting an existing file always asks first.
+When a reply contains code, each code block gets a **💾 Save** button. It writes that file straight into your **📁 Project folder** (the same one the coding agent uses). Subfolders are supported (`src/utils.js` creates the `src` folder), and if the model names the file in the fence (a fence starting with `js app.js`, or `title=app.js`) the button shows that name — otherwise you are asked for one. Overwriting an existing file always asks first.
 
-- Requires **Chrome, Edge or Opera on desktop** (the browser's File System Access API). In Firefox/Safari the folder section simply doesn't appear.
-- Your folder choice is remembered across restarts (stored in IndexedDB). After restarting the browser, one click on **📁 Re-allow** re-opens it.
-- Files are written only when you click save — the app never scans, reads or uploads your folder, and files stay on your machine.
+- The local server does the writing, so saving works in **every browser** — no Chrome-only APIs.
+- If no folder is set yet, clicking **💾 Save** opens the Project folder section for you.
+- Files change only when you click **Save** or approve a diff card — nothing is uploaded anywhere, and files stay on your machine.
 
 ## Coding agent: work inside your project (optional)
 
 Turn the chat into a coding agent for one folder:
 
-1. Open **🗂 Project folder · coding agent** in the sidebar, paste the full path of your project (for example `C:\Users\you\projects\my-app`) and click **Use this folder**. The status line under the chat box then shows **agent folder on**.
+1. Open **📁 Project folder** in the sidebar, paste the full path of your project (for example `C:\Users\you\projects\my-app`) and click **Use this folder**. The status line under the chat box then shows **agent folder on**.
 2. Ask it to do something real: `Find where the API key is read and add a check for empty keys.` The model searches and reads your files on its own.
 3. When it wants to change a file, a **diff card** appears in the reply: green `+` lines are additions, red `−` lines are deletions. Click **✓ Apply** to write the change or **✗ Reject** to refuse it. The model sees the outcome and continues.
 
@@ -96,7 +96,7 @@ Safety, by design:
 - The server binds to `127.0.0.1` only, and every path is resolved and checked against the chosen folder — `..`, absolute paths and symlinks cannot escape it.
 - Reads run automatically; **writes never happen without your click**. Rejecting is always safe.
 - Binary files, huge files and `.git`/`node_modules` are skipped during search; reads refuse binary data.
-- Clearing the field (leave it empty and click **Use this folder**) turns agent mode off and the file tools disappear.
+- Clearing the field (leave it empty and click **Use this folder**) turns the agent off — file tools and 💾 Save both need a folder.
 
 ## Fine-tuning (optional, experimental)
 
@@ -104,7 +104,7 @@ River is also a training platform (SFT / RL / distillation) via the Python `rive
 
 ## Verification
 
-`npm test` runs local integration tests against a mock upstream; they do not spend API credits. They cover forwarding, validation (roles, images, sampling params, size limits), the tool loop and its round limit, usage/reasoning passthrough, stream errors, connecting a provider from the page (including bad input and clearing it again), the coding-agent workspace (folder validation, sandbox-escape attempts, read tools, and the propose → approve → write flow including rejections), and blocked private/cross-origin access. A live smoke test (tools + vision) was run manually with a real key.
+`npm test` runs local integration tests against a mock upstream; they do not spend API credits. They cover forwarding, validation (roles, images, sampling params, size limits), the tool loop and its round limit, usage/reasoning passthrough, stream errors, connecting a provider from the page (including bad input and clearing it again), the coding-agent workspace (folder validation, sandbox-escape attempts, read tools, the propose → approve → write flow including rejections, and the 💾 Save endpoint), and blocked private/cross-origin access. A live smoke test (tools + vision) was run manually with a real key.
 
 ## Files
 

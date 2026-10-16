@@ -63,17 +63,12 @@
       <input id="stop" type="text" maxlength="400" placeholder="e.g. END, ###">
     </details>
     <details id="projectBox" class="settings">
-      <summary>🗂 Project folder · coding agent</summary>
+      <summary>📁 Project folder · agent &amp; saves</summary>
       <label for="projectPath">YOUR PROJECT FOLDER (FULL PATH)</label>
       <input id="projectPath" type="text" maxlength="1000" placeholder="C:\Users\you\projects\my-app" autocomplete="off" spellcheck="false">
-      <button id="projectUse" class="text-button" type="button">🗂 Use this folder</button>
-      <p class="hint" id="projectHint">Optional: paste the full path of your code project. The AI can then read files and propose edits — you approve every change. Click with an empty field to turn it off.</p>
+      <button id="projectUse" class="text-button" type="button">📁 Use this folder</button>
+      <p class="hint" id="projectHint">Paste the full path of your code project. The AI can read files there and propose edits (you approve every change), and 💾 Save buttons write into this folder. Empty + click turns it off.</p>
     </details>
-    <div id="folderBox" class="folder-box" hidden>
-      <label>CODE OUTPUT FOLDER</label>
-      <button id="folderBtn" type="button" class="text-button">📁 Choose folder for saved code…</button>
-      <p class="hint" id="folderHint">Save buttons under code blocks write files there.</p>
-    </div>
     <div class="sidebar-bottom">
       <span class="dot"></span> Runs on your computer
       <p>Chats stay in this browser.<br>Requests use your API balance only when you send.</p>

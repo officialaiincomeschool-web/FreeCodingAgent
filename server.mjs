@@ -340,7 +340,7 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
       models: modelList, pricing: PRICING, tools: BUILTIN_TOOLS.map(t => t.function.name),
       workspace: workspace ? { ready: true, root: workspace.label } : { ready: false, root: null }
     });
-    if (!['/api/chat', '/api/models', '/api/provider', '/api/workspace', '/api/workspace/approval'].includes(url.pathname)) return json(res, 404, { error: 'Not found' });
+    if (!['/api/chat', '/api/models', '/api/provider', '/api/workspace', '/api/workspace/approval', '/api/workspace/save'].includes(url.pathname)) return json(res, 404, { error: 'Not found' });
     const validMethod = (req.method === 'POST' && url.pathname !== '/api/models') || (req.method === 'GET' && url.pathname === '/api/models');
     if (!validMethod) return json(res, 405, { error: 'Method not allowed' });
 
@@ -399,6 +399,29 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
       pendingApprovals.delete(payload.id);
       entry.resolve(payload.approve ? 'approve' : 'reject');
       return json(res, 200, { ok: true });
+    }
+
+    if (url.pathname === '/api/workspace/save') {
+      if (!req.headers['content-type']?.includes('application/json')) return json(res, 415, { error: 'Send JSON.' });
+      let payload;
+      try { payload = await readJsonBody(req, 1024 * 1024); }
+      catch (e) { return json(res, e.tooLarge ? 413 : 400, { error: e.message }); }
+      if (!workspace) return json(res, 400, { error: 'Set your project folder first (sidebar → Project folder).' });
+      if (typeof payload.content !== 'string' || payload.content.length > WRITE_MAX_CHARS) return json(res, 400, { error: 'content must be text under 300,000 characters.' });
+      let abs;
+      try {
+        abs = resolveInRoot(workspace.root, payload.path);
+        await assertReallyInside(workspace.root, abs);
+      } catch (e) { return json(res, 400, { error: e.message }); }
+      const rel = relDisplay(path.relative(workspace.root, abs));
+      const info = await stat(abs).catch(() => null);
+      if (info && !info.isFile()) return json(res, 400, { error: `"${rel}" is a folder, not a file.` });
+      if (info && !payload.overwrite) return json(res, 409, { error: `"${rel}" already exists. Overwrite it?`, exists: true });
+      try {
+        await mkdir(path.dirname(abs), { recursive: true });
+        await writeFile(abs, payload.content, 'utf8');
+      } catch { return json(res, 400, { error: 'Could not write that file. Check the folder path.' }); }
+      return json(res, 200, { saved: rel });
     }
 
     if (!uiProvider && !envReady) return json(res, 503, { error: 'No API key yet. Open Model & settings in the page and connect your provider, or set API_KEY in .env.' });

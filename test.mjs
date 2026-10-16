@@ -421,4 +421,37 @@ test('coding agent workspace: reads files, proposes edits, needs approval', asyn
     assert.ok(!events.some(e => e.type === 'proposal'), 'no proposal should be sent for outside paths');
     await assert.rejects(readFile(outside), /ENOENT/);
   });
+
+  await t.test('save endpoint writes code into the folder, asks before overwrite', async () => {
+    const save = body => api('/api/workspace/save', body);
+    const first = await save({ path: 'saved/note.txt', content: 'console.log(1);\n' });
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).saved, 'saved/note.txt');
+    assert.equal(await readFile(path.join(dir, 'saved', 'note.txt'), 'utf8'), 'console.log(1);\n');
+
+    const exists = await save({ path: 'saved/note.txt', content: 'console.log(2);\n' });
+    assert.equal(exists.status, 409);
+    assert.equal((await exists.json()).exists, true);
+    assert.equal(await readFile(path.join(dir, 'saved', 'note.txt'), 'utf8'), 'console.log(1);\n');
+
+    const overwrite = await save({ path: 'saved/note.txt', content: 'console.log(2);\n', overwrite: true });
+    assert.equal(overwrite.status, 200);
+    assert.equal(await readFile(path.join(dir, 'saved', 'note.txt'), 'utf8'), 'console.log(2);\n');
+
+    assert.equal((await save({ path: '../sneaky.txt', content: 'x' })).status, 400);
+    assert.equal((await save({ path: 'saved', content: 'x' })).status, 400);
+    assert.equal((await save({ path: 'ok.txt', content: 'x'.repeat(300001) })).status, 400);
+  });
+
+  await t.test('clearing the folder turns saves and file tools off', async () => {
+    await api('/api/workspace', { path: '' });
+    const refused = await api('/api/workspace/save', { path: 'x.txt', content: 'x' });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).error, /project folder/i);
+
+    const events = await collect(await chat('agent-read'));
+    const tool = events.find(e => e.type === 'tool');
+    assert.equal(tool.ok, false);
+    assert.match(tool.result, /no project folder/i);
+  });
 });
