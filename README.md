@@ -135,5 +135,10 @@ River is also a training platform (SFT / RL / distillation) via the Python `rive
 - `test.mjs`: mock integration tests (`npm test`)
 - `finetune/`: optional Python scripts for River training (see its README)
 - `.env.example`: optional file-based provider configuration template
+- `LICENSE`: MIT license
 
 Official references: https://docs.river.ai/guides/inference/ · https://docs.river.ai/guides/inference-tools/ · https://docs.river.ai/guides/inference-images/ · https://docs.river.ai/guides/inference-controls/
+
+## License
+
+MIT — free to use, copy, modify and share (just keep the copyright notice); comes with no warranty. See [LICENSE](LICENSE).
