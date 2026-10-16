@@ -1,6 +1,6 @@
 # Build with AI — local single-page chatbot
 
-A dark navy, amber and teal chat interface powered by any OpenAI-compatible API. Connect your provider right in the page (base URL + API key) or set it in `.env`. Model selection, streaming replies, visible reasoning, image (vision) input, built-in tools, token/cost metering and multi-conversation history. No third-party packages or build step: the browser talks to a small local Node server, and only that server talks to your provider.
+A dark navy, amber and teal chat interface powered by any OpenAI-compatible API. Connect your provider right in the page (base URL + API key) or set it in `.env`. Model selection, streaming replies, visible reasoning, image (vision) input, built-in tools, token/cost metering and multi-conversation history. It can also act as a coding agent: point it at your project folder and the AI gains file tools — it reads your code, and every proposed edit is shown as a diff you approve before anything is written. No third-party packages or build step: the browser talks to a small local Node server, and only that server talks to your provider.
 
 ## Run in VS Code (Windows)
 
@@ -30,7 +30,8 @@ Keep the terminal running. Ctrl+C stops the server. Do not use VS Code Live Serv
 | Provider from the page | Under **Model & settings**, enter any OpenAI-compatible base URL + API key and click **⚡ Connect & load models**. The app verifies the key, loads the provider's model list, and remembers it in this browser. `.env` stays as fallback. |
 | Vision | Attach up to 4 PNG/JPEG images per message with the **🖼 Images** button, paste, or drag-and-drop. Images are downscaled in your browser to 1600 px JPEG before sending. |
 | Reasoning | Reasoning models stream their thinking into a collapsible **Thinking** panel. Set **Reasoning effort** per model (`DeepSeek`: none/high/max; `GLM`: low/high/max). |
-| Tools | With **Allow tools** on, the model can call a safe calculator, current time, and Wikipedia lookup. Each call is shown inline with its result; the loop stops after 5 rounds. |
+| Tools | With **Allow tools** on, the model can call a safe calculator, current time, and Wikipedia lookup. Each call is shown inline with its result; the loop stops after 8 rounds. |
+| Coding agent (project folder) | Under **🗂 Project folder**, paste the full path of your project (e.g. `C:\projects\my-app`). The AI then gets file tools: `list_files`, `read_file` and `search_files` run automatically, while `write_file` and `edit_file` pause and show a **diff card with ✓ Apply / ✗ Reject** — nothing is written until you approve. All paths are sandboxed to that folder. |
 | Token & cost meter | Every reply shows input/output/reasoning/cached tokens and an estimated cost using River's published per-model prices. |
 | Sampling controls | Temperature (0–2), top P (0–1), stop sequences (up to 4) and a System prompt in **Model & settings**. |
 | Model switching | The model picker is **searchable** — click it and type to filter (full IDs shown for `free/`-style names). Switching models keeps the conversation; use **＋ New conversation** for an independent comparison. The selected model, token limit and tool state are shown under the chat box. **↻ Refresh available models** queries your provider. |
@@ -48,7 +49,7 @@ Keep the terminal running. Ctrl+C stops the server. Do not use VS Code Live Serv
 The server uses any OpenAI-compatible endpoint (`POST /chat/completions` — set from the page or via `BASE_URL`; defaults to River's `https://api.river.ai/v1`) and re-streams normalized events to the page: text, reasoning, tool calls, usage and completion status.
 
 - Requests: max 24 MiB body (images count), up to 4 images per message, each ≤ ~4.5 MB after base64, 100 messages per request, 3–10 minutes upstream timeout, no automatic retries.
-- Tool loop: the server executes tool calls (calculator/time/Wikipedia) and continues the conversation, at most 5 rounds per request.
+- Tool loop: the server executes tool calls (calculator/time/Wikipedia, plus sandboxed file tools when a project folder is set) and continues the conversation, at most 8 rounds per request. File reads are capped at 2 MB per file and 400 lines per read by default; searches skip `.git`/`node_modules` and stop after 60 matches; writes are limited to 300,000 characters. A proposed change waits up to 10 minutes for your Apply/Reject click — ignoring it or pressing Stop simply cancels the change.
 - Output limit: default 4,096 tokens including reasoning. Increase it if an answer is cut short; the reply shows when it was.
 - Privacy: conversation history lives in your browser's localStorage, and a provider key entered in the page is stored there too (plus in the server's memory while it runs — never on disk, never in Git). The server exposes only four public files and never `.env`.
 
@@ -82,13 +83,28 @@ When a reply contains code, each code block gets a **💾 Save** button. Click i
 - Your folder choice is remembered across restarts (stored in IndexedDB). After restarting the browser, one click on **📁 Re-allow** re-opens it.
 - Files are written only when you click save — the app never scans, reads or uploads your folder, and files stay on your machine.
 
+## Coding agent: work inside your project (optional)
+
+Turn the chat into a coding agent for one folder:
+
+1. Open **🗂 Project folder · coding agent** in the sidebar, paste the full path of your project (for example `C:\Users\you\projects\my-app`) and click **Use this folder**. The status line under the chat box then shows **agent folder on**.
+2. Ask it to do something real: `Find where the API key is read and add a check for empty keys.` The model searches and reads your files on its own.
+3. When it wants to change a file, a **diff card** appears in the reply: green `+` lines are additions, red `−` lines are deletions. Click **✓ Apply** to write the change or **✗ Reject** to refuse it. The model sees the outcome and continues.
+
+Safety, by design:
+
+- The server binds to `127.0.0.1` only, and every path is resolved and checked against the chosen folder — `..`, absolute paths and symlinks cannot escape it.
+- Reads run automatically; **writes never happen without your click**. Rejecting is always safe.
+- Binary files, huge files and `.git`/`node_modules` are skipped during search; reads refuse binary data.
+- Clearing the field (leave it empty and click **Use this folder**) turns agent mode off and the file tools disappear.
+
 ## Fine-tuning (optional, experimental)
 
 River is also a training platform (SFT / RL / distillation) via the Python `river-client`. The `finetune/` folder has ready scripts (see `finetune/README.md`). Note: this requires Python 3.12 or newer and training may be billed separately — check **Console → Billing → Pricing**.
 
 ## Verification
 
-`npm test` runs local integration tests against a mock upstream; they do not spend API credits. They cover forwarding, validation (roles, images, sampling params, size limits), the tool loop and its round limit, usage/reasoning passthrough, stream errors, connecting a provider from the page (including bad input and clearing it again), and blocked private/cross-origin access. A live smoke test (tools + vision) was run manually with a real key.
+`npm test` runs local integration tests against a mock upstream; they do not spend API credits. They cover forwarding, validation (roles, images, sampling params, size limits), the tool loop and its round limit, usage/reasoning passthrough, stream errors, connecting a provider from the page (including bad input and clearing it again), the coding-agent workspace (folder validation, sandbox-escape attempts, read tools, and the propose → approve → write flow including rejections), and blocked private/cross-origin access. A live smoke test (tools + vision) was run manually with a real key.
 
 ## Files
 

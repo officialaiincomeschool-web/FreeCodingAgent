@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const LS_CHATS = 'riverchat.chats.v2';
 const LS_SETTINGS = 'riverchat.settings.v2';
 const LS_PROVIDER = 'riverchat.provider.v1';
+const LS_WORKSPACE = 'riverchat.workspace.v1';
 
 let pricing = {};
 let state = { chats: [], activeId: null };
@@ -14,6 +15,7 @@ let outputDir = null;
 let folderGranted = false;
 let providerConfig = { baseUrl: '', apiKey: '' };
 let connection = { ready: false, source: null, baseUrl: null };
+let workspace = { ready: false, root: null };
 let models = [];
 let currentModel = '';
 
@@ -42,6 +44,7 @@ function updateModelLine() {
   if (model) bits.push(model);
   if ($('tokens').value) bits.push($('tokens').value + ' max tokens');
   if ($('tools').checked) bits.push('tools on');
+  if (workspace.ready) bits.push('agent folder on');
   if ($('effort').value) bits.push('reasoning: ' + $('effort').value);
   $('modelLine').textContent = bits.join(' · ');
   $('modelLine').hidden = bits.length === 0;
@@ -154,6 +157,90 @@ function toolRow(trace) {
   row.append(name, document.createTextNode('('), args, document.createTextNode(') → '), result, status);
   return row;
 }
+function ensureProposals(refs) {
+  if (!refs.proposalList) {
+    const box = document.createElement('div'); box.className = 'proposals';
+    refs.card.insertBefore(box, refs.body);
+    refs.proposalList = box;
+  }
+  return refs.proposalList;
+}
+function diffRows(before, after) {
+  const a = typeof before === 'string' ? before.split('\n') : [];
+  const b = String(after ?? '').split('\n');
+  let rows;
+  if (a.length * b.length > 1000000) {
+    rows = [...a.map(l => ({ t: 'del', l })), ...b.map(l => ({ t: 'add', l }))];
+  } else {
+    const width = b.length + 1;
+    const dp = new Uint32Array((a.length + 1) * width);
+    for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) dp[i * width + j] = a[i] === b[j] ? dp[(i + 1) * width + j + 1] + 1 : Math.max(dp[(i + 1) * width + j], dp[i * width + j + 1]);
+    rows = []; let i = 0, j = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { rows.push({ t: 'ctx', l: a[i] }); i++; j++; }
+      else if (dp[(i + 1) * width + j] >= dp[i * width + j + 1]) { rows.push({ t: 'del', l: a[i] }); i++; }
+      else { rows.push({ t: 'add', l: b[j] }); j++; }
+    }
+    while (i < a.length) rows.push({ t: 'del', l: a[i++] });
+    while (j < b.length) rows.push({ t: 'add', l: b[j++] });
+  }
+  const out = []; let run = [];
+  const flush = () => { if (run.length <= 6) out.push(...run); else out.push(...run.slice(0, 3), { t: 'gap', n: run.length - 6 }, ...run.slice(-3)); run = []; };
+  for (const row of rows) { if (row.t === 'ctx') run.push(row); else { flush(); out.push(row); } }
+  flush();
+  return out;
+}
+function proposalCard(item) {
+  const card = document.createElement('div'); card.className = 'proposal';
+  const head = document.createElement('div'); head.className = 'proposal-head';
+  const title = document.createElement('b');
+  title.textContent = item.tool === 'edit_file' ? '✎ Edit request' : (item.before === null ? '📄 New file request' : '✎ Rewrite request');
+  const file = document.createElement('code'); file.textContent = item.path;
+  const rows = diffRows(item.before ?? null, item.after ?? '');
+  const added = rows.filter(r => r.t === 'add').length;
+  const removed = rows.filter(r => r.t === 'del').length;
+  const counts = document.createElement('span'); counts.className = 'proposal-counts';
+  counts.textContent = `+${added} −${removed}${item.clipped ? ' · preview trimmed for storage' : ''}`;
+  const state = document.createElement('span'); state.className = 'proposal-state';
+  head.append(title, file, counts, state);
+  const diff = document.createElement('div'); diff.className = 'proposal-diff';
+  let shown = 0;
+  for (const row of rows) {
+    if (shown >= 500) { const more = document.createElement('div'); more.className = 'dl gap'; more.textContent = `… ${rows.length - shown} more lines — open the file to see the rest`; diff.append(more); break; }
+    const line = document.createElement('div');
+    line.className = 'dl ' + (row.t === 'add' ? 'add' : row.t === 'del' ? 'del' : row.t === 'gap' ? 'gap' : 'ctx');
+    line.textContent = row.t === 'add' ? '+ ' + row.l : row.t === 'del' ? '- ' + row.l : row.t === 'gap' ? `… ${row.n} unchanged lines` : '  ' + row.l;
+    diff.append(line); shown++;
+  }
+  const actions = document.createElement('div'); actions.className = 'proposal-actions';
+  const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'apply'; apply.textContent = '✓ Apply';
+  const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'reject'; reject.textContent = '✗ Reject';
+  const setState = (text, cls) => { state.textContent = text; state.className = 'proposal-state' + (cls ? ' ' + cls : ''); };
+  const decide = async approve => {
+    apply.disabled = reject.disabled = true;
+    setState(approve ? 'applying…' : 'rejecting…', '');
+    try {
+      await readJSON(await fetch('/api/workspace/approval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id, approve }) }));
+      item.decision = approve ? 'applied' : 'rejected';
+      setState(approve ? '✓ applied' : '✗ rejected', approve ? 'ok' : 'no');
+      actions.remove();
+      notice('');
+    } catch (e) {
+      setState('failed — you can try again', 'no');
+      apply.disabled = reject.disabled = false;
+      notice(e.message);
+    }
+  };
+  apply.onclick = () => decide(true);
+  reject.onclick = () => decide(false);
+  actions.append(apply, reject);
+  card.append(head, diff, actions);
+  if (item.decision) {
+    setState(item.decision === 'applied' ? '✓ applied' : '✗ rejected', item.decision === 'applied' ? 'ok' : 'no');
+    actions.remove();
+  }
+  return card;
+}
 function renderText(target, text) {
   target.replaceChildren();
   const parts = text.split('```');
@@ -220,6 +307,7 @@ function renderMessage(record) {
       refs.toolsSummary.textContent = `Tools used: ${names} · ${record.tools.length} call${record.tools.length > 1 ? 's' : ''}`;
       refs.toolsBox.open = false;
     }
+    if (record.proposals?.length) { const list = ensureProposals(refs); for (const item of record.proposals) list.append(proposalCard(item)); }
     renderText(body, record.text);
     meta.textContent = usageLine(record.model ?? activeChat()?.model, record.usage, record.finish);
     card.append(body);
@@ -239,7 +327,7 @@ function usageLine(model, usage, finish) {
     }
   }
   if (finish === 'length') bits.push('Output limit reached. Ask “continue” or increase Max output tokens.');
-  if (finish === 'tool_limit') bits.push('Tool limit reached after 5 rounds.');
+  if (finish === 'tool_limit') bits.push('Tool limit reached. Ask “continue” so the agent can keep working.');
   return bits.join(' · ');
 }
 function renderMessages() {
@@ -544,6 +632,28 @@ $('modelList').addEventListener('keydown', event => {
 document.addEventListener('pointerdown', event => { if (!$('modelMenu').hidden && !event.target.closest('#modelMenu, #modelButton')) closeModelMenu(); });
 window.addEventListener('resize', () => { if (!$('modelMenu').hidden) positionModelMenu(); });
 document.addEventListener('scroll', () => { if (!$('modelMenu').hidden) positionModelMenu(); }, true);
+
+// ---- project folder (coding agent) ----
+
+function updateWorkspaceUI() {
+  $('projectUse').textContent = workspace.ready ? '✓ Folder in use · change or clear' : '🗂 Use this folder';
+  $('projectHint').textContent = workspace.ready
+    ? 'Agent mode is ON for ' + workspace.root + '. The AI can read files there; every change is shown as a diff and needs your approval.'
+    : 'Optional: paste the full path of your code project. The AI can then read files and propose edits — you approve every change. Click with an empty field to turn it off.';
+  updateModelLine();
+}
+$('projectUse').onclick = async () => {
+  const folder = $('projectPath').value.trim();
+  $('projectUse').disabled = true;
+  try {
+    const data = await readJSON(await fetch('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: folder }) }));
+    workspace = { ready: data.ready, root: data.root ?? null };
+    try { if (data.ready) localStorage.setItem(LS_WORKSPACE, folder); else localStorage.removeItem(LS_WORKSPACE); } catch { /* ignore */ }
+    updateWorkspaceUI();
+    notice(data.ready ? 'Agent folder set: ' + data.root + ' — the AI can read this folder, and every change needs your approval.' : 'Agent folder cleared. The AI can no longer touch your files.');
+  } catch (e) { notice(e.message); }
+  finally { $('projectUse').disabled = false; }
+};
 for (const [id, key] of [['temperature', 'temperature'], ['top_p', 'top_p'], ['stop', 'stop'], ['systemPrompt', 'systemPrompt']]) {
   $(id).addEventListener('input', () => { settings[key] = $(id).value.trim(); persist(); });
 }
@@ -646,6 +756,7 @@ $('form').onsubmit = async event => {
 
   let text = '', reasoning = '', usage = null, finish = null, done = false, streamError = null;
   const toolTrace = [];
+  const proposals = [];
   try {
     const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: active.signal });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `HTTP ${response.status}`);
@@ -660,6 +771,13 @@ $('form').onsubmit = async event => {
       if (item.type === 'content') { text += item.text; refs.body.textContent = text; refs.body.classList.add('streaming'); scroll(); }
       else if (item.type === 'reasoning') { reasoning += item.text; ensureThinking(refs, true).textContent = reasoning; if (!text) { refs.body.textContent = 'Thinking…'; refs.body.classList.add('streaming'); } scroll(); }
       else if (item.type === 'tool') { toolTrace.push({ name: item.name, args: item.args, result: item.result, ok: item.ok, ms: item.ms }); ensureTools(refs, true).append(toolRow(toolTrace.at(-1))); refs.toolsSummary.textContent = `Using tools… (${toolTrace.length})`; scroll(); }
+      else if (item.type === 'proposal') {
+        const pending = { id: item.id, tool: item.tool, path: item.path, before: item.before ?? null, after: item.after ?? '', decision: null };
+        proposals.push(pending);
+        ensureProposals(refs).append(proposalCard(pending));
+        notice('Change requested: ' + item.path + ' — review the diff above the message and click Apply or Reject.');
+        scroll();
+      }
       else if (item.type === 'usage') usage = item.usage;
       else if (item.type === 'done') { finish = item.finish_reason; done = true; }
       else if (item.type === 'error') streamError = item.message;
@@ -691,6 +809,12 @@ $('form').onsubmit = async event => {
     const assistantRecord = { role: 'assistant', text };
     if (reasoning) assistantRecord.reasoning = reasoning;
     if (toolTrace.length) assistantRecord.tools = toolTrace;
+    if (proposals.length) assistantRecord.proposals = proposals.map(pending => ({
+      id: pending.id, tool: pending.tool, path: pending.path, decision: pending.decision,
+      before: pending.before === null ? null : pending.before.slice(0, 60000),
+      after: String(pending.after ?? '').slice(0, 60000),
+      clipped: (pending.before?.length ?? 0) > 60000 || (pending.after?.length ?? 0) > 60000
+    }));
     if (usage) assistantRecord.usage = usage;
     if (finish) assistantRecord.finish = finish;
     chat.messages.push(userRecord, assistantRecord);
@@ -768,6 +892,18 @@ fetch('/api/config').then(readJSON).then(async data => {
       connection = { ready: fresh.configured, source: fresh.source ?? null, baseUrl: fresh.baseUrl ?? null };
       if (fresh.models?.length) fillModels(fresh.models);
     } catch (e) { notice('Saved provider could not reconnect: ' + e.message); }
+  }
+  workspace = { ready: Boolean(data.workspace?.ready), root: data.workspace?.root ?? null };
+  let savedFolder = '';
+  try { savedFolder = localStorage.getItem(LS_WORKSPACE) || ''; } catch { /* ignore */ }
+  if (savedFolder) $('projectPath').value = savedFolder;
+  updateWorkspaceUI();
+  if (savedFolder && !workspace.ready) {
+    try {
+      const fresh = await readJSON(await fetch('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: savedFolder }) }));
+      workspace = { ready: fresh.ready, root: fresh.root ?? null };
+      updateWorkspaceUI();
+    } catch { notice('The saved project folder could not be reopened — set it again under Project folder.'); }
   }
   updateProviderUI(); updateConnectionUI();
   if (!data.models.length && connection.ready) $('refresh').click();

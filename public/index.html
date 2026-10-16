@@ -52,7 +52,7 @@
         <option value="8192">8,192 · Longer answers</option>
         <option value="16384">16,384 · Extended</option>
       </select>
-      <label class="check"><input type="checkbox" id="tools" checked> Allow tools <span class="hint">calculator · time · Wikipedia</span></label>
+      <label class="check"><input type="checkbox" id="tools" checked> Allow tools <span class="hint">calculator · time · Wikipedia · project files</span></label>
       <label for="systemPrompt">SYSTEM PROMPT</label>
       <textarea id="systemPrompt" rows="3" maxlength="4000" placeholder="Optional: set the model's role and rules."></textarea>
       <label for="temperature">TEMPERATURE (0–2)</label>
@@ -61,6 +61,13 @@
       <input id="top_p" type="number" min="0" max="1" step="0.05" placeholder="Model default">
       <label for="stop">STOP SEQUENCES (COMMA SEPARATED, MAX 4)</label>
       <input id="stop" type="text" maxlength="400" placeholder="e.g. END, ###">
+    </details>
+    <details id="projectBox" class="settings">
+      <summary>🗂 Project folder · coding agent</summary>
+      <label for="projectPath">YOUR PROJECT FOLDER (FULL PATH)</label>
+      <input id="projectPath" type="text" maxlength="1000" placeholder="C:\Users\you\projects\my-app" autocomplete="off" spellcheck="false">
+      <button id="projectUse" class="text-button" type="button">🗂 Use this folder</button>
+      <p class="hint" id="projectHint">Optional: paste the full path of your code project. The AI can then read files and propose edits — you approve every change. Click with an empty field to turn it off.</p>
     </details>
     <div id="folderBox" class="folder-box" hidden>
       <label>CODE OUTPUT FOLDER</label>

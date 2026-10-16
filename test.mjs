@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createApp, evaluateExpression, executeTool, MAX_TOOL_ROUNDS } from './server.mjs';
 
 const BASE = 'deepseek-ai/Test-Nano';
@@ -277,5 +280,145 @@ test('tool executors are safe and correct', async t => {
     assert.match(badLang.result, /language/i);
     const noQuery = await executeTool('wikipedia_lookup', {});
     assert.equal(noQuery.ok, false);
+  });
+});
+
+test('coding agent workspace: reads files, proposes edits, needs approval', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'riverchat-agent-'));
+  t.after(() => rm(dir, { recursive: true, force: true }).catch(() => {}));
+  await writeFile(path.join(dir, 'hello.js'), 'function add(a, b) {\n  return a + b;\n}\n');
+  await mkdir(path.join(dir, 'src'));
+  await writeFile(path.join(dir, 'src', 'notes.txt'), 'alpha\nbeta\ngamma\n');
+
+  const upstream = http.createServer(async (req, res) => {
+    if (req.url === '/models') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'agent/model' }] })); }
+    let raw = ''; for await (const c of req) raw += c;
+    const body = JSON.parse(raw);
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    if (body.messages.at(-1).role === 'tool') {
+      return res.end(sse({ choices: [{ delta: { content: 'Tool said: ' + body.messages.at(-1).content.slice(0, 160) } }] }) + sse({ choices: [{ delta: {}, finish_reason: 'stop' }], usage }) + 'data: [DONE]\n\n');
+    }
+    const calls = {
+      'agent-read': ['read_file', { path: 'hello.js' }],
+      'agent-list': ['list_files', { path: 'src' }],
+      'agent-search': ['search_files', { query: 'beta' }],
+      'agent-write': ['write_file', { path: 'new/deep/river.txt', content: 'hello from the agent\n' }],
+      'agent-edit': ['edit_file', { path: 'hello.js', old_string: 'return a + b;', new_string: 'return a + b; // sum' }],
+      'agent-deny': ['write_file', { path: 'never.txt', content: 'should not exist\n' }],
+      'agent-escape': ['write_file', { path: '../riverchat-escape-check.txt', content: 'nope\n' }]
+    };
+    const [name, args] = calls[body.model];
+    res.end(
+      sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }] }) +
+      sse({ choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage }) +
+      'data: [DONE]\n\n'
+    );
+  });
+  const up = await listen(upstream);
+  const app = createApp({ apiKey: 'test-secret', upstream: up });
+  const url = await listen(app);
+  t.after(() => { for (const s of [app, upstream]) { s.closeAllConnections(); s.close(); } });
+
+  const api = (pathname, body) => fetch(url + pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const chat = model => api('/api/chat', { model, max_tokens: 4096, tools: true, messages: [{ role: 'user', content: 'go' }] });
+  const collect = async (response, onEvent) => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const events = [];
+    let buffer = '';
+    const handleBlock = async block => {
+      const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n').trim();
+      if (!data) return;
+      const item = JSON.parse(data);
+      events.push(item);
+      if (onEvent) await onEvent(item);
+    };
+    for (;;) {
+      const part = await reader.read();
+      buffer += part.done ? decoder.decode() : decoder.decode(part.value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let cut;
+      while ((cut = buffer.indexOf('\n\n')) >= 0) { const block = buffer.slice(0, cut); buffer = buffer.slice(cut + 2); await handleBlock(block); }
+      if (part.done) break;
+    }
+    if (buffer.trim()) await handleBlock(buffer);
+    return events;
+  };
+
+  await t.test('sets, validates and clears the project folder', async () => {
+    assert.equal((await api('/api/workspace', { path: path.join(dir, 'missing') })).status, 400);
+    assert.equal((await api('/api/workspace', { path: path.join(dir, 'hello.js') })).status, 400);
+    assert.equal((await api('/api/workspace/approval', { id: 'nope', approve: true })).status, 404);
+    const ok = await api('/api/workspace', { path: dir });
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).ready, true);
+    const config = await (await fetch(url + '/api/config')).json();
+    assert.equal(config.workspace.ready, true);
+    assert.equal(config.workspace.root.toLowerCase(), dir.toLowerCase());
+    const cleared = await api('/api/workspace', { path: '' });
+    assert.equal((await cleared.json()).ready, false);
+    const foreign = await fetch(url + '/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://untrusted.example' }, body: JSON.stringify({ path: dir }) });
+    assert.equal(foreign.status, 403);
+    await api('/api/workspace', { path: dir });
+  });
+
+  await t.test('read tools see the project files', async () => {
+    const readEvents = await collect(await chat('agent-read'));
+    const readTool = readEvents.find(e => e.type === 'tool');
+    assert.equal(readTool.ok, true);
+    assert.match(readTool.result, /return a \+ b;/);
+    assert.ok(readEvents.some(e => e.type === 'done'));
+
+    const listEvents = await collect(await chat('agent-list'));
+    assert.match(listEvents.find(e => e.type === 'tool').result, /notes\.txt/);
+
+    const searchEvents = await collect(await chat('agent-search'));
+    assert.match(searchEvents.find(e => e.type === 'tool').result, /src\/notes\.txt:2/);
+  });
+
+  await t.test('write tools wait for approval, then apply', async () => {
+    let proposal = null;
+    const events = await collect(await chat('agent-write'), async event => {
+      if (event.type === 'proposal') {
+        proposal = event;
+        assert.equal(event.path, 'new/deep/river.txt');
+        assert.equal(event.before, null);
+        assert.equal(event.after, 'hello from the agent\n');
+        assert.equal((await api('/api/workspace/approval', { id: event.id, approve: true })).status, 200);
+      }
+    });
+    assert.ok(proposal, 'a proposal event should be sent');
+    assert.equal(await readFile(path.join(dir, 'new', 'deep', 'river.txt'), 'utf8'), 'hello from the agent\n');
+    assert.match(events.find(e => e.type === 'tool').result, /Applied/);
+    assert.equal(events.find(e => e.type === 'done').finish_reason, 'stop');
+  });
+
+  await t.test('edits require approval and apply exactly', async () => {
+    const events = await collect(await chat('agent-edit'), async event => {
+      if (event.type === 'proposal') await api('/api/workspace/approval', { id: event.id, approve: true });
+    });
+    assert.match(await readFile(path.join(dir, 'hello.js'), 'utf8'), /return a \+ b; \/\/ sum/);
+    assert.equal(events.find(e => e.type === 'tool').ok, true);
+  });
+
+  await t.test('rejected changes are not written', async () => {
+    const events = await collect(await chat('agent-deny'), async event => {
+      if (event.type === 'proposal') await api('/api/workspace/approval', { id: event.id, approve: false });
+    });
+    const tool = events.find(e => e.type === 'tool');
+    assert.equal(tool.ok, true);
+    assert.match(tool.result, /rejected/i);
+    await assert.rejects(readFile(path.join(dir, 'never.txt')), /ENOENT/);
+  });
+
+  await t.test('cannot escape the project folder', async () => {
+    const outside = path.join(dir, '..', 'riverchat-escape-check.txt');
+    await rm(outside, { force: true }).catch(() => {});
+    const events = await collect(await chat('agent-escape'));
+    const tool = events.find(e => e.type === 'tool');
+    assert.equal(tool.ok, false);
+    assert.match(tool.result, /outside the project folder/);
+    assert.ok(!events.some(e => e.type === 'proposal'), 'no proposal should be sent for outside paths');
+    await assert.rejects(readFile(outside), /ENOENT/);
   });
 });
