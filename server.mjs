@@ -133,7 +133,7 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
     if (!host || !/^(localhost|127\.0\.0\.1):\d+$/.test(host)) return json(res, 403, { error: 'Use the local URL printed in the terminal.' });
     if (req.headers.origin && ![`http://${host}`].includes(req.headers.origin)) return json(res, 403, { error: 'Cross-origin requests are blocked.' });
     const url = new URL(req.url, `http://${host}`);
-    const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+    const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
     if (req.method === 'GET' && files[url.pathname]) {
       try { const [file, type] = files[url.pathname]; const content = await readFile(path.join(root, 'public', file)); res.writeHead(200, { 'Content-Type': type + '; charset=utf-8' }); res.end(content); }
       catch { json(res, 500, { error: 'Could not load the page.' }); } return;

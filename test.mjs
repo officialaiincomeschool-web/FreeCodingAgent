@@ -48,7 +48,7 @@ test('local server forwards chats with images, reasoning, usage and tools', asyn
   const payload = { model: BASE, max_tokens: 4096, temperature: 0.5, top_p: 0.9, stop: ['END'], reasoning_effort: 'none', systemPrompt: 'Be brief.', foo: 'bar', messages: [{ role: 'user', content: 'My name is AIBrain' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'What is my name?' }] };
 
   await t.test('serves page, JS and CSS with the Build with AI brand', async () => {
-    for (const route of ['/', '/app.js', '/style.css']) assert.equal((await fetch(url + route)).status, 200);
+    for (const route of ['/', '/app.js', '/style.css', '/icon.svg']) assert.equal((await fetch(url + route)).status, 200);
     assert.match(await (await fetch(url + '/')).text(), /BUILD WITH AI/);
   });
   await t.test('does not serve private files', async () => { assert.equal((await fetch(url + '/.env')).status, 404); assert.equal((await fetch(url + '/server.mjs')).status, 404); });
