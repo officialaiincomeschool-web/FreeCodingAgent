@@ -15,7 +15,10 @@ let folderGranted = false;
 const shortName = id => String(id || '').split('/').pop();
 const activeChat = () => state.chats.find(c => c.id === state.activeId) ?? state.chats[0];
 function notice(text) { $('notice').textContent = text; }
-function scroll() { $('conversation').scrollTop = $('conversation').scrollHeight; }
+function scroll(force) {
+  const conversation = $('conversation');
+  if (force || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 260) conversation.scrollTop = conversation.scrollHeight;
+}
 function setBusy(b) { busy = b; for (const id of ['send', 'newChat', 'model', 'tokens', 'refresh', 'effort', 'attach']) $(id).disabled = b; $('stop').hidden = !b; }
 function readJSON(response) { return response.json().then(data => { if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`); return data; }); }
 
@@ -126,16 +129,26 @@ function renderText(target, text) {
       const code = document.createElement('code');
       code.textContent = codeText;
       pre.append(code);
-      if (!FS_SUPPORTED) { target.append(pre); return; }
       const block = document.createElement('div'); block.className = 'code-block';
       const bar = document.createElement('div'); bar.className = 'code-bar';
+      const tokens = info.split(/\s+/).filter(Boolean);
+      const language = tokens.length && !/^(title|file|filename)=/i.test(tokens[0]) ? tokens[0] : '';
       const name = fenceTarget(info);
-      const save = document.createElement('button');
-      save.type = 'button'; save.className = 'code-save';
-      save.textContent = name ? `💾 Save as ${name}` : '💾 Save code';
-      save.title = 'Save this code into your chosen folder';
-      save.onclick = () => saveCodeBlock(codeText, info);
-      bar.append(save);
+      const lang = document.createElement('span'); lang.className = 'code-lang';
+      lang.textContent = language && language !== name ? language : 'code';
+      const copy = document.createElement('button');
+      copy.type = 'button'; copy.className = 'code-tool'; copy.textContent = 'Copy';
+      copy.title = 'Copy this code block';
+      copy.onclick = async () => { try { await navigator.clipboard.writeText(codeText); copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy', 1200); } catch { notice('Select the code and copy it manually.'); } };
+      bar.append(lang, copy);
+      if (FS_SUPPORTED) {
+        const save = document.createElement('button');
+        save.type = 'button'; save.className = 'code-tool code-save';
+        save.textContent = name ? `💾 Save as ${name}` : '💾 Save';
+        save.title = 'Save this code into your chosen folder';
+        save.onclick = () => saveCodeBlock(codeText, info);
+        bar.append(save);
+      }
       block.append(bar, pre);
       target.append(block);
     } else target.append(document.createTextNode(part));
@@ -147,7 +160,7 @@ const userText = record => (record.parts ?? []).filter(p => p.type === 'text').m
 function renderMessage(record) {
   $('welcome').hidden = true;
   const card = document.createElement('article'); card.className = `message ${record.role}`;
-  const label = document.createElement('div'); label.className = 'label'; label.textContent = record.role === 'user' ? 'YOU' : 'RIVER';
+  const label = document.createElement('div'); label.className = 'label'; label.textContent = record.role === 'user' ? 'YOU' : 'AI';
   const body = document.createElement('div'); body.className = 'body';
   const meta = document.createElement('div'); meta.className = 'meta';
   card.append(label);
@@ -200,7 +213,7 @@ function renderMessages() {
     const refs = renderMessage(record);
     if (record.role === 'user') addCopy(refs.card, userText(record));
   }
-  scroll();
+  scroll(true);
 }
 function renderChatList() {
   const list = $('chats');
@@ -231,6 +244,7 @@ function renderChatList() {
 }
 function openChat(id) {
   if (busy) return;
+  setMenu(false);
   state.activeId = id;
   const chat = activeChat();
   if (chat.model && [...$('model').options].some(option => option.value === chat.model)) $('model').value = chat.model;
@@ -424,6 +438,7 @@ $('refresh').onclick = async () => {
 };
 $('newChat').onclick = () => {
   if (busy) return;
+  setMenu(false);
   const chat = newChatRecord();
   if (!chat.model) chat.model = $('model').value;
   state.chats.unshift(chat); state.activeId = chat.id;
@@ -469,7 +484,11 @@ $('form').onsubmit = async event => {
   const userRefs = renderMessage(userRecord);
   addCopy(userRefs.card, promptText);
   const refs = renderMessage({ role: 'assistant', text: '' });
-  refs.body.textContent = 'Connecting…';
+  const skeleton = document.createElement('div'); skeleton.className = 'skeleton';
+  for (let i = 0; i < 3; i++) skeleton.append(document.createElement('span'));
+  refs.body.replaceChildren(skeleton);
+  refs.card.classList.add('generating');
+  scroll(true);
 
   const body = { model: chat.model || $('model').value, messages: outgoing, max_tokens: Number($('tokens').value), tools: $('tools').checked };
   const temperature = parseFloat($('temperature').value);
@@ -482,7 +501,7 @@ $('form').onsubmit = async event => {
   const systemPrompt = $('systemPrompt').value.trim();
   if (systemPrompt) body.systemPrompt = systemPrompt;
 
-  $('prompt').value = ''; attachments = []; renderAttachments(); notice('');
+  $('prompt').value = ''; attachments = []; renderAttachments(); notice(''); autoGrow();
   active = new AbortController(); setBusy(true);
 
   let text = '', reasoning = '', usage = null, finish = null, done = false, streamError = null;
@@ -498,8 +517,8 @@ $('form').onsubmit = async event => {
       let item;
       try { item = JSON.parse(data); } catch { return; }
       if (typeof item.type !== 'string') { console.warn('Unrecognized stream event (is this an outdated page? hard-refresh with Ctrl+Shift+R):', item); return; }
-      if (item.type === 'content') { text += item.text; refs.body.textContent = text; scroll(); }
-      else if (item.type === 'reasoning') { reasoning += item.text; ensureThinking(refs, true).textContent = reasoning; if (!text) refs.body.textContent = 'Thinking…'; scroll(); }
+      if (item.type === 'content') { text += item.text; refs.body.textContent = text; refs.body.classList.add('streaming'); scroll(); }
+      else if (item.type === 'reasoning') { reasoning += item.text; ensureThinking(refs, true).textContent = reasoning; if (!text) { refs.body.textContent = 'Thinking…'; refs.body.classList.add('streaming'); } scroll(); }
       else if (item.type === 'tool') { toolTrace.push({ name: item.name, args: item.args, result: item.result, ok: item.ok, ms: item.ms }); ensureTools(refs, true).append(toolRow(toolTrace.at(-1))); refs.toolsSummary.textContent = `Using tools… (${toolTrace.length})`; scroll(); }
       else if (item.type === 'usage') usage = item.usage;
       else if (item.type === 'done') { finish = item.finish_reason; done = true; }
@@ -524,6 +543,8 @@ $('form').onsubmit = async event => {
       const names = [...new Set(toolTrace.map(t => t.name))].join(', ');
       refs.toolsSummary.textContent = `Tools used: ${names} · ${toolTrace.length} call${toolTrace.length > 1 ? 's' : ''}`;
     }
+    refs.card.classList.remove('generating');
+    refs.body.classList.remove('streaming');
     renderText(refs.body, text);
     refs.meta.textContent = usageLine(body.model, usage, finish);
     addCopy(refs.card, text);
@@ -538,10 +559,13 @@ $('form').onsubmit = async event => {
     chat.model = body.model;
     persist(); renderChatList();
   } catch (e) {
+    refs.card.classList.remove('generating');
+    refs.body.classList.remove('streaming');
     refs.meta.textContent = e.name === 'AbortError' ? 'Stopped. This exchange was not added to the next request.' : e.message;
     if (!text) refs.body.textContent = 'No reply received.';
     else renderText(refs.body, text);
     if (!$('prompt').value) $('prompt').value = promptText;
+    autoGrow();
     if (content !== promptText) { attachments = parts.filter(p => p.type === 'image_url').map(p => ({ url: p.image_url.url, name: 'image' })); renderAttachments(); notice('Images were kept so you can retry.'); }
   } finally {
     active = null; setBusy(false); $('prompt').focus(); scroll();
@@ -553,6 +577,23 @@ $('form').onsubmit = async event => {
 loadAll();
 hydrateSettings();
 renderAll();
+
+// ---- app shell: drawer, scroll-to-bottom, composer ----
+
+function setMenu(open) { document.body.classList.toggle('menu-open', open); }
+$('menu').onclick = () => setMenu(true);
+$('closeMenu').onclick = () => setMenu(false);
+$('overlay').onclick = () => setMenu(false);
+document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenu(false); });
+
+const conversationEl = $('conversation');
+conversationEl.addEventListener('scroll', () => { $('toBottom').hidden = conversationEl.scrollHeight - conversationEl.scrollTop - conversationEl.clientHeight < 320; });
+$('toBottom').onclick = () => conversationEl.scrollTo({ top: conversationEl.scrollHeight, behavior: 'smooth' });
+
+function autoGrow() { const el = $('prompt'); el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 190) + 'px'; }
+$('prompt').addEventListener('input', autoGrow);
+for (const button of document.querySelectorAll('.suggestions button')) button.onclick = () => { $('prompt').value = button.dataset.prompt || ''; autoGrow(); $('prompt').focus(); };
+
 if (FS_SUPPORTED) {
   $('folderBtn').onclick = async () => {
     if (outputDir && !folderGranted) {

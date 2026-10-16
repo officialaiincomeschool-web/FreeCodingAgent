@@ -2,16 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Build with AI · River Chat</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#090e18">
+<title>Build with AI · local chat workspace</title>
 <link rel="stylesheet" href="/style.css">
 <script src="/app.js" defer></script>
 </head>
 <body>
 <div class="app">
-  <aside>
+  <div id="overlay" aria-hidden="true"></div>
+  <aside id="sidebar">
+    <button id="closeMenu" class="icon-btn close-menu" type="button" aria-label="Close menu">✕</button>
     <a class="brand" href="/">≈ <span>BUILD WITH AI<small>YOUR LOCAL AI WORKSPACE</small></span></a>
-    <button id="newChat" class="new">＋ New conversation</button>
+    <button id="newChat" class="new" type="button">＋ New conversation</button>
     <div class="chats-wrap">
       <label id="chatsLabel">CONVERSATIONS</label>
       <ul id="chats" aria-labelledby="chatsLabel"></ul>
@@ -20,7 +23,7 @@
       <summary>Model &amp; settings</summary>
       <label for="model">MODEL</label>
       <select id="model"></select>
-      <button id="refresh" class="text-button">↻ Refresh available models</button>
+      <button id="refresh" class="text-button" type="button">↻ Refresh available models</button>
       <div id="effortBox">
         <label for="effort">REASONING EFFORT</label>
         <select id="effort"></select>
@@ -50,13 +53,19 @@
     </div>
     <div class="sidebar-bottom">
       <span class="dot"></span> Runs on your computer
-      <p>Powered by River API<br>Requests use your River balance.</p>
-      <a href="https://console.river.ai/" target="_blank" rel="noopener noreferrer">Open River Console ↗</a>
+      <p>Chats stay in this browser.<br>Requests use your API balance only when you send.</p>
+      <a href="https://console.river.ai/" target="_blank" rel="noopener noreferrer">Open provider console ↗</a>
     </div>
   </aside>
   <main>
     <header>
-      <div><span class="eyebrow">BUILD WITH AI / PLAYGROUND</span><h1>A little curiosity. A lot of possibility.</h1></div>
+      <button id="menu" class="icon-btn menu-btn" type="button" aria-label="Open menu">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h13M2.5 9h13M2.5 13.5h13"/></svg>
+      </button>
+      <div>
+        <span class="eyebrow">BUILD WITH AI / PLAYGROUND</span>
+        <h1>A little curiosity. A lot of possibility.</h1>
+      </div>
       <span id="connection" class="status">Checking setup…</span>
     </header>
     <div id="notice" role="status"></div>
@@ -67,24 +76,25 @@
         <h2>What are we exploring?</h2>
         <p>Ask a question, attach an image, or give the tools a task.</p>
         <div class="suggestions">
-          <button data-prompt="Explain APIs with a simple real-world example."><b>Understand something</b><span>Explain APIs in simple terms ↗</span></button>
-          <button data-prompt="Write a JavaScript function that converts km/h to m/s. Include three examples."><b>Write some code</b><span>Turn an idea into a function ↗</span></button>
-          <button data-prompt="Use your calculator tool to work out what 18% of 2,450 is, then explain the steps."><b>Try the tools</b><span>Do real math with the calculator ↗</span></button>
+          <button type="button" data-prompt="Explain APIs with a simple real-world example."><i>🧠</i><b>Understand something</b><span>Explain APIs in simple terms ↗</span></button>
+          <button type="button" data-prompt="Write a JavaScript function that converts km/h to m/s. Include three examples."><i>💻</i><b>Write some code</b><span>Turn an idea into a function ↗</span></button>
+          <button type="button" data-prompt="Use your calculator tool to work out what 18% of 2,450 is, then explain the steps."><i>🧮</i><b>Try the tools</b><span>Do real math with the calculator ↗</span></button>
         </div>
       </div>
       <div id="messages" role="log" aria-label="Chat messages"></div>
     </section>
+    <button id="toBottom" class="to-bottom" type="button" aria-label="Scroll to latest" hidden>↓</button>
     <footer>
       <form id="form">
         <div id="attachments" class="thumbs"></div>
         <label class="sr-only" for="prompt">Your message</label>
-        <textarea id="prompt" placeholder="Ask anything… paste or drop images too" rows="2" maxlength="100000"></textarea>
+        <textarea id="prompt" placeholder="Ask anything… paste or drop images too" rows="1" maxlength="100000"></textarea>
         <div class="composer-bottom">
-          <button id="attach" type="button" title="Attach PNG or JPEG images (up to 4)">🖼 Images</button>
+          <button id="attach" type="button" title="Attach PNG or JPEG images (up to 4)">🖼<span class="attach-label">&nbsp;Images</span></button>
           <input id="fileInput" type="file" accept="image/png,image/jpeg" multiple hidden>
-          <span>Enter to send · Shift + Enter for a new line</span>
+          <span class="send-hint">Enter to send · Shift + Enter for a new line</span>
           <button id="stop" type="button" hidden>■ Stop</button>
-          <button id="send" type="submit">Send message ↗</button>
+          <button id="send" type="submit" aria-label="Send message" title="Send">↗</button>
         </div>
       </form>
       <p>Chats are saved in this browser. Messages go only to your configured AI provider when you click Send.</p>
