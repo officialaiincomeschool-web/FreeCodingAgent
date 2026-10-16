@@ -18,7 +18,7 @@ export const PRICING = {
   'zai-org/GLM-5.3-Flash': { input: 0.12, cached: 0.024, output: 0.40 }
 };
 
-const HINTS = { 401: 'The API key was rejected. Check .env and restart.', 403: 'This account does not have access to the model.', 404: 'Model or endpoint not found. Refresh models or check the exact model ID.', 402: 'Check your account balance.', 429: 'Rate limit or capacity reached. Wait and try again.' };
+const HINTS = { 401: 'The API key was rejected. Check it under Model & settings, or in .env.', 403: 'This account does not have access to the model.', 404: 'Model or endpoint not found. Refresh models or check the exact model ID.', 402: 'Check your account balance.', 429: 'Rate limit or capacity reached. Wait and try again.' };
 
 const MAX_BODY = 24 * 1024 * 1024;          // 24 MiB, includes base64 images
 const MAX_IMAGE_CHARS = 6_000_000;          // ~4.5 MB per image after base64
@@ -125,6 +125,8 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
   const base = String(upstream).replace(/\/+$/, '');
   const modelList = models ?? (envModels.length ? envModels : (base.includes('river.ai') ? defaults : []));
   const provider = { streamUsage: true };
+  let uiProvider = null; // provided from the page via POST /api/provider; env values are the fallback
+  const active = () => uiProvider ?? { base, key: apiKey };
   return http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -138,19 +140,55 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
       try { const [file, type] = files[url.pathname]; const content = await readFile(path.join(root, 'public', file)); res.writeHead(200, { 'Content-Type': type + '; charset=utf-8' }); res.end(content); }
       catch { json(res, 500, { error: 'Could not load the page.' }); } return;
     }
-    const ready = Boolean(apiKey && !String(apiKey).startsWith('replace_with'));
-    if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, { configured: ready, models: modelList, pricing: PRICING, tools: BUILTIN_TOOLS.map(t => t.function.name) });
-    if (!['/api/chat', '/api/models'].includes(url.pathname)) return json(res, 404, { error: 'Not found' });
-    if (!ready) return json(res, 503, { error: 'Add RIVER_API_KEY (or API_KEY) to .env, then restart npm start.' });
-    if (!((req.method === 'POST' && url.pathname === '/api/chat') || (req.method === 'GET' && url.pathname === '/api/models'))) return json(res, 405, { error: 'Method not allowed' });
+    const envReady = Boolean(apiKey && !String(apiKey).startsWith('replace_with'));
+    if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, {
+      configured: Boolean(uiProvider) || envReady,
+      source: uiProvider ? 'ui' : (envReady ? 'env' : null),
+      baseUrl: uiProvider ? uiProvider.base : (envReady ? base : null),
+      models: modelList, pricing: PRICING, tools: BUILTIN_TOOLS.map(t => t.function.name)
+    });
+    if (!['/api/chat', '/api/models', '/api/provider'].includes(url.pathname)) return json(res, 404, { error: 'Not found' });
+    const validMethod = (req.method === 'POST' && url.pathname !== '/api/models') || (req.method === 'GET' && url.pathname === '/api/models');
+    if (!validMethod) return json(res, 405, { error: 'Method not allowed' });
+
+    if (url.pathname === '/api/provider') {
+      if (!req.headers['content-type']?.includes('application/json')) return json(res, 415, { error: 'Send JSON.' });
+      const chunks = []; let bytes = 0;
+      for await (const chunk of req) { bytes += chunk.length; if (bytes > 65536) return json(res, 413, { error: 'Request is too large.' }); chunks.push(chunk); }
+      let payload;
+      try { payload = JSON.parse(Buffer.concat(chunks).toString()); } catch { return json(res, 400, { error: 'Invalid JSON.' }); }
+      const baseUrl = typeof payload.baseUrl === 'string' ? payload.baseUrl.trim() : '';
+      const key = typeof payload.apiKey === 'string' ? payload.apiKey.trim() : '';
+      if (!baseUrl && !key) {
+        uiProvider = null;
+        return json(res, 200, { source: envReady ? 'env' : null, configured: envReady, baseUrl: envReady ? base : null, models: modelList });
+      }
+      if (!baseUrl || !key) return json(res, 400, { error: 'Enter both the base URL and the API key.' });
+      if (baseUrl.length > 300 || key.length > 500 || /\s/.test(key)) return json(res, 400, { error: 'Check the base URL and the key (keys cannot contain spaces).' });
+      let parsed;
+      try { parsed = new URL(baseUrl); } catch { return json(res, 400, { error: 'That base URL is not a valid URL.' }); }
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return json(res, 400, { error: 'Use a plain http(s) base URL without username or password.' });
+      const clean = baseUrl.replace(/\/+$/, '');
+      let response;
+      try { response = await fetch(clean + '/models', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20000) }); }
+      catch { return json(res, 400, { error: 'Could not reach that base URL. Check it and your internet connection.' }); }
+      if (!response.ok) return json(res, 400, { error: response.status === 401 ? 'The provider rejected this API key.' : `The provider answered HTTP ${response.status}. Check the base URL and the key.` });
+      let data;
+      try { data = await response.json(); } catch { return json(res, 400, { error: 'The base URL did not return a model list. Does it end with /v1?' }); }
+      uiProvider = { base: clean, key };
+      return json(res, 200, { source: 'ui', configured: true, baseUrl: clean, models: (data.data || []).map(m => m.id).filter(id => typeof id === 'string') });
+    }
+
+    if (!uiProvider && !envReady) return json(res, 503, { error: 'No API key yet. Open Model & settings in the page and connect your provider, or set API_KEY in .env.' });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     res.on('close', () => controller.abort());
 
     try {
+      const current = active();
       if (url.pathname === '/api/models') {
-        const response = await fetch(base + '/models', { headers: { Authorization: `Bearer ${apiKey}` }, signal: controller.signal });
+        const response = await fetch(current.base + '/models', { headers: { Authorization: `Bearer ${current.key}` }, signal: controller.signal });
         if (!response.ok) return json(res, response.status, { error: HINTS[response.status] || `The provider returned HTTP ${response.status}.` });
         const data = await response.json();
         return json(res, 200, { models: (data.data || []).map(m => m.id).filter(id => typeof id === 'string') });
@@ -195,7 +233,7 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
       let finish = null;
 
       for (let round = 0; ; round++) {
-        const result = await streamCompletion({ model, maxTokens: max_tokens, messages: convo, tools: Boolean(tools), extras, base, apiKey, signal: controller.signal, out, provider });
+        const result = await streamCompletion({ model, maxTokens: max_tokens, messages: convo, tools: Boolean(tools), extras, base: current.base, apiKey: current.key, signal: controller.signal, out, provider });
         usage.rounds++;
         if (result.usage) {
           usage.prompt_tokens += result.usage.prompt_tokens ?? 0;

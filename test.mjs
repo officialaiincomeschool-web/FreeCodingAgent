@@ -193,6 +193,66 @@ test('works with any OpenAI-compatible provider', async t => {
   });
 });
 
+test('provider can be configured from the page', async t => {
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization });
+    if (req.url === '/models') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'ui/chat-1' }, { id: 'ui/chat-2' }] })); }
+    for await (const _ of req) { /* drain */ }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(sse({ choices: [{ delta: { content: 'hello from the UI provider' } }] }) + sse({ choices: [{ delta: {}, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n');
+  });
+  const up = await listen(upstream);
+  const app = createApp({ apiKey: '', upstream: 'https://unset.example/v1' }); const url = await listen(app);
+  t.after(() => { for (const s of [app, upstream]) { s.closeAllConnections(); s.close(); } });
+  const post = (path, body) => fetch(url + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  await t.test('starts unconfigured without env keys', async () => {
+    const config = await (await fetch(url + '/api/config')).json();
+    assert.equal(config.configured, false);
+    assert.equal(config.source, null);
+    assert.equal((await fetch(url + '/api/models')).status, 503);
+  });
+  await t.test('rejects bad provider input', async () => {
+    assert.equal((await post('/api/provider', { baseUrl: 'not a url', apiKey: 'k' })).status, 400);
+    assert.equal((await post('/api/provider', { baseUrl: 'https://api.example.com/v1' })).status, 400);
+    assert.equal((await post('/api/provider', { baseUrl: 'https://api.example.com/v1', apiKey: 'has space' })).status, 400);
+    assert.equal((await post('/api/provider', { baseUrl: 'ftp://api.example.com/v1', apiKey: 'k' })).status, 400);
+    assert.equal((await post('/api/provider', { baseUrl: 'http://user:pass@api.example.com/v1', apiKey: 'k' })).status, 400);
+  });
+  await t.test('connects, loads models and chats through the UI provider', async () => {
+    seen.length = 0;
+    const r = await post('/api/provider', { baseUrl: up + '/', apiKey: 'ui-secret' });
+    assert.equal(r.status, 200);
+    const data = await r.json();
+    assert.equal(data.source, 'ui');
+    assert.deepEqual(data.models, ['ui/chat-1', 'ui/chat-2']);
+    assert.equal(seen[0].url, '/models');
+    assert.equal(seen[0].auth, 'Bearer ui-secret');
+
+    const chat = await post('/api/chat', { model: 'ui/chat-1', max_tokens: 4096, messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(chat.status, 200);
+    const text = await chat.text();
+    assert.match(text, /hello from the UI provider/);
+    assert.equal(seen.at(-1).url, '/chat/completions');
+    assert.equal(seen.at(-1).auth, 'Bearer ui-secret');
+
+    const config = await (await fetch(url + '/api/config')).json();
+    assert.equal(config.configured, true);
+    assert.equal(config.source, 'ui');
+    const raw = JSON.stringify(config);
+    assert.ok(!raw.includes('ui-secret'), 'config must never reveal the key');
+  });
+  await t.test('clearing the provider falls back to env settings', async () => {
+    const r = await post('/api/provider', { baseUrl: '', apiKey: '' });
+    assert.equal(r.status, 200);
+    const data = await r.json();
+    assert.equal(data.source, null);
+    assert.equal(data.configured, false);
+    assert.equal((await fetch(url + '/api/models')).status, 503);
+  });
+});
+
 test('tool executors are safe and correct', async t => {
   await t.test('calculator evaluates expressions', () => {
     assert.equal(evaluateExpression('2+2'), 4);

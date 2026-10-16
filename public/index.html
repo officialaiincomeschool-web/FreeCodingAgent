@@ -22,6 +22,12 @@
     </div>
     <details id="settings" class="settings" open>
       <summary>Model &amp; settings</summary>
+      <label for="baseUrl">PROVIDER BASE URL</label>
+      <input id="baseUrl" type="text" maxlength="300" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false">
+      <label for="providerKey">PROVIDER API KEY</label>
+      <input id="providerKey" type="password" maxlength="500" placeholder="Kept in this browser only" autocomplete="off">
+      <button id="connect" class="text-button" type="button">⚡ Connect &amp; load models</button>
+      <p class="hint" id="providerHint">Enter your provider’s base URL and API key. Saved in this browser only.</p>
       <label for="model">MODEL</label>
       <select id="model"></select>
       <button id="refresh" class="text-button" type="button">↻ Refresh available models</button>
@@ -98,6 +104,7 @@
           <button id="send" type="submit" aria-label="Send message" title="Send">↗</button>
         </div>
       </form>
+      <p id="modelLine" class="model-line" hidden></p>
       <p>Chats are saved in this browser. Messages go only to your configured AI provider when you click Send.</p>
     </footer>
   </main>

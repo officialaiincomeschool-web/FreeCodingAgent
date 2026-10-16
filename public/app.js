@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const LS_CHATS = 'riverchat.chats.v2';
 const LS_SETTINGS = 'riverchat.settings.v2';
+const LS_PROVIDER = 'riverchat.provider.v1';
 
 let pricing = {};
 let state = { chats: [], activeId: null };
@@ -11,6 +12,8 @@ let busy = false;
 const FS_SUPPORTED = typeof window.showDirectoryPicker === 'function';
 let outputDir = null;
 let folderGranted = false;
+let providerConfig = { baseUrl: '', apiKey: '' };
+let connection = { ready: false, source: null, baseUrl: null };
 
 const shortName = id => String(id || '').split('/').pop();
 const activeChat = () => state.chats.find(c => c.id === state.activeId) ?? state.chats[0];
@@ -21,6 +24,26 @@ function scroll(force) {
 }
 function setBusy(b) { busy = b; for (const id of ['send', 'newChat', 'model', 'tokens', 'refresh', 'effort', 'attach']) $(id).disabled = b; $('stop').hidden = !b; }
 function readJSON(response) { return response.json().then(data => { if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`); return data; }); }
+const safeHost = url => { try { return new URL(url).host; } catch { return String(url || ''); } };
+function updateProviderUI() {
+  if (connection.source === 'ui') $('providerHint').textContent = 'Connected to ' + safeHost(connection.baseUrl) + '. Saved in this browser only.';
+  else if (connection.source === 'env') $('providerHint').textContent = 'Using the values from .env. Fill both fields above to use a different provider.';
+  else $('providerHint').textContent = 'Enter your provider’s base URL and API key. Saved in this browser only.';
+}
+function updateConnectionUI() {
+  $('connection').textContent = !connection.ready ? 'Setup needed' : (connection.source === 'ui' ? 'Connected · ' + safeHost(connection.baseUrl) : 'Connected · .env');
+  $('connection').classList.toggle('warn', !connection.ready);
+}
+function updateModelLine() {
+  const bits = [];
+  const model = $('model').value || activeChat()?.model;
+  if (model) bits.push(model);
+  if ($('tokens').value) bits.push($('tokens').value + ' max tokens');
+  if ($('tools').checked) bits.push('tools on');
+  if ($('effort').value) bits.push('reasoning: ' + $('effort').value);
+  $('modelLine').textContent = bits.join(' · ');
+  $('modelLine').hidden = bits.length === 0;
+}
 
 // ---- persistence ----
 
@@ -39,6 +62,18 @@ function loadAll() {
 function trySave() {
   try { localStorage.setItem(LS_CHATS, JSON.stringify({ chats: state.chats, activeId: state.activeId })); return true; }
   catch { return false; }
+}
+function loadProvider() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_PROVIDER) || 'null');
+    if (saved && typeof saved === 'object') providerConfig = { baseUrl: String(saved.baseUrl || ''), apiKey: String(saved.apiKey || '') };
+  } catch { /* nothing saved */ }
+}
+function saveProvider() {
+  try {
+    if (providerConfig.baseUrl || providerConfig.apiKey) localStorage.setItem(LS_PROVIDER, JSON.stringify(providerConfig));
+    else localStorage.removeItem(LS_PROVIDER);
+  } catch { /* ignore */ }
 }
 function stripOldestImage() {
   for (const chat of state.chats) for (const message of chat.messages) {
@@ -399,6 +434,7 @@ function updateEffort() {
   $('effort').replaceChildren(...choices.map(([value, label]) => { const option = document.createElement('option'); option.value = value; option.textContent = label; return option; }));
   const wanted = [previous, settings.effort].find(value => choices.some(([v]) => v === value));
   $('effort').value = wanted ?? '';
+  updateModelLine();
 }
 function fillModels(models) {
   const select = $('model');
@@ -425,8 +461,9 @@ $('model').addEventListener('change', () => {
 for (const [id, key] of [['temperature', 'temperature'], ['top_p', 'top_p'], ['stop', 'stop'], ['systemPrompt', 'systemPrompt']]) {
   $(id).addEventListener('input', () => { settings[key] = $(id).value.trim(); persist(); });
 }
-$('tools').addEventListener('change', () => { settings.tools = $('tools').checked; persist(); });
-$('effort').addEventListener('change', () => { settings.effort = $('effort').value; persist(); });
+$('tools').addEventListener('change', () => { settings.tools = $('tools').checked; persist(); updateModelLine(); });
+$('effort').addEventListener('change', () => { settings.effort = $('effort').value; persist(); updateModelLine(); });
+$('tokens').addEventListener('change', updateModelLine);
 $('refresh').onclick = async () => {
   $('refresh').disabled = true; notice('Loading models…');
   try {
@@ -435,6 +472,22 @@ $('refresh').onclick = async () => {
     fillModels(data.models); notice('Available models updated.');
   } catch (e) { notice(e.message); }
   finally { $('refresh').disabled = false; }
+};
+$('connect').onclick = async () => {
+  const baseUrl = $('baseUrl').value.trim();
+  const apiKey = $('providerKey').value.trim();
+  $('connect').disabled = true; notice('Checking the provider…');
+  try {
+    const data = await readJSON(await fetch('/api/provider', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl, apiKey }) }));
+    providerConfig = data.source === 'ui' ? { baseUrl, apiKey } : { baseUrl: '', apiKey: '' };
+    saveProvider();
+    connection = { ready: data.configured, source: data.source ?? null, baseUrl: data.baseUrl ?? null };
+    fillModels(data.models ?? []);
+    updateProviderUI(); updateConnectionUI();
+    if (data.source === 'ui') notice(`Connected to ${safeHost(data.baseUrl)} — ${data.models.length} model${data.models.length === 1 ? '' : 's'} loaded.`);
+    else notice(data.configured ? 'Now using the provider configured in .env.' : 'Cleared. Enter a base URL and key to connect your provider.');
+  } catch (e) { notice(e.message); }
+  finally { $('connect').disabled = false; }
 };
 $('newChat').onclick = () => {
   if (busy) return;
@@ -469,6 +522,7 @@ $('prompt').addEventListener('keydown', event => {
 $('form').onsubmit = async event => {
   event.preventDefault();
   if (busy) return;
+  if (!connection.ready) { notice('Connect your AI provider first: open Model & settings and click "Connect & load models".'); return; }
   const chat = activeChat();
   const promptText = $('prompt').value.trim();
   if (!promptText && !attachments.length) return;
@@ -575,7 +629,10 @@ $('form').onsubmit = async event => {
 // ---- init ----
 
 loadAll();
+loadProvider();
 hydrateSettings();
+$('baseUrl').value = providerConfig.baseUrl;
+$('providerKey').value = providerConfig.apiKey;
 renderAll();
 
 // ---- app shell: drawer, scroll-to-bottom, composer ----
@@ -614,13 +671,21 @@ if (FS_SUPPORTED) {
     updateFolderUI();
   })();
 }
-fetch('/api/config').then(readJSON).then(data => {
+fetch('/api/config').then(readJSON).then(async data => {
   pricing = data.pricing ?? {};
+  connection = { ready: data.configured, source: data.source ?? null, baseUrl: data.baseUrl ?? null };
   fillModels(data.models);
-  if (!data.models.length) $('refresh').click();
+  if (providerConfig.baseUrl && providerConfig.apiKey) {
+    try {
+      const fresh = await readJSON(await fetch('/api/provider', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(providerConfig) }));
+      connection = { ready: fresh.configured, source: fresh.source ?? null, baseUrl: fresh.baseUrl ?? null };
+      if (fresh.models?.length) fillModels(fresh.models);
+    } catch (e) { notice('Saved provider could not reconnect: ' + e.message); }
+  }
+  updateProviderUI(); updateConnectionUI();
+  if (!data.models.length && connection.ready) $('refresh').click();
   if (!activeChat().model) { activeChat().model = $('model').value; persist(); }
-  $('connection').textContent = data.configured ? 'API key configured' : 'Setup needed';
-  if (!data.configured) notice('Add your API key to .env, then restart the server. See README.md.');
+  if (!connection.ready) notice('Connect your provider under Model & settings to start chatting.');
 }).catch(() => {
   notice('Start this app with npm start and open the local URL. Do not open index.html directly.');
   $('connection').textContent = 'Server unavailable';
