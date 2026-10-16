@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Build with AI · River Chat</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <a class="brand" href="/">≈ <span>BUILD WITH AI<small>YOUR LOCAL AI WORKSPACE</small></span></a>
+    <button id="newChat" class="new">＋ New conversation</button>
+    <div class="chats-wrap">
+      <label id="chatsLabel">CONVERSATIONS</label>
+      <ul id="chats" aria-labelledby="chatsLabel"></ul>
+    </div>
+    <details id="settings" class="settings" open>
+      <summary>Model &amp; settings</summary>
+      <label for="model">MODEL</label>
+      <select id="model"></select>
+      <button id="refresh" class="text-button">↻ Refresh available models</button>
+      <div id="effortBox">
+        <label for="effort">REASONING EFFORT</label>
+        <select id="effort"></select>
+        <p class="hint">DeepSeek can turn reasoning off; GLM always reasons; the budget is shared with output.</p>
+      </div>
+      <label for="tokens">MAX OUTPUT TOKENS</label>
+      <select id="tokens">
+        <option value="2048">2,048 · Short answers</option>
+        <option value="4096" selected>4,096 · Balanced</option>
+        <option value="8192">8,192 · Longer answers</option>
+        <option value="16384">16,384 · Extended</option>
+      </select>
+      <label class="check"><input type="checkbox" id="tools" checked> Allow tools <span class="hint">calculator · time · Wikipedia</span></label>
+      <label for="systemPrompt">SYSTEM PROMPT</label>
+      <textarea id="systemPrompt" rows="3" maxlength="4000" placeholder="Optional: set the model's role and rules."></textarea>
+      <label for="temperature">TEMPERATURE (0–2)</label>
+      <input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
+      <label for="top_p">TOP P (0–1)</label>
+      <input id="top_p" type="number" min="0" max="1" step="0.05" placeholder="Model default">
+      <label for="stop">STOP SEQUENCES (COMMA SEPARATED, MAX 4)</label>
+      <input id="stop" type="text" maxlength="400" placeholder="e.g. END, ###">
+    </details>
+    <div id="folderBox" class="folder-box" hidden>
+      <label>CODE OUTPUT FOLDER</label>
+      <button id="folderBtn" type="button" class="text-button">📁 Choose folder for saved code…</button>
+      <p class="hint" id="folderHint">Save buttons under code blocks write files there.</p>
+    </div>
+    <div class="sidebar-bottom">
+      <span class="dot"></span> Runs on your computer
+      <p>Powered by River API<br>Requests use your River balance.</p>
+      <a href="https://console.river.ai/" target="_blank" rel="noopener noreferrer">Open River Console ↗</a>
+    </div>
+  </aside>
+  <main>
+    <header>
+      <div><span class="eyebrow">BUILD WITH AI / PLAYGROUND</span><h1>A little curiosity. A lot of possibility.</h1></div>
+      <span id="connection" class="status">Checking setup…</span>
+    </header>
+    <div id="notice" role="status"></div>
+    <section id="conversation" aria-label="Conversation">
+      <div id="welcome">
+        <div class="wave">≈</div>
+        <span class="eyebrow">LET YOUR IDEAS FLOW</span>
+        <h2>What are we exploring?</h2>
+        <p>Ask a question, attach an image, or give the tools a task.</p>
+        <div class="suggestions">
+          <button data-prompt="Explain APIs with a simple real-world example."><b>Understand something</b><span>Explain APIs in simple terms ↗</span></button>
+          <button data-prompt="Write a JavaScript function that converts km/h to m/s. Include three examples."><b>Write some code</b><span>Turn an idea into a function ↗</span></button>
+          <button data-prompt="Use your calculator tool to work out what 18% of 2,450 is, then explain the steps."><b>Try the tools</b><span>Do real math with the calculator ↗</span></button>
+        </div>
+      </div>
+      <div id="messages" role="log" aria-label="Chat messages"></div>
+    </section>
+    <footer>
+      <form id="form">
+        <div id="attachments" class="thumbs"></div>
+        <label class="sr-only" for="prompt">Your message</label>
+        <textarea id="prompt" placeholder="Ask anything… paste or drop images too" rows="2" maxlength="100000"></textarea>
+        <div class="composer-bottom">
+          <button id="attach" type="button" title="Attach PNG or JPEG images (up to 4)">🖼 Images</button>
+          <input id="fileInput" type="file" accept="image/png,image/jpeg" multiple hidden>
+          <span>Enter to send · Shift + Enter for a new line</span>
+          <button id="stop" type="button" hidden>■ Stop</button>
+          <button id="send" type="submit">Send message ↗</button>
+        </div>
+      </form>
+      <p>Chats are saved in this browser. Messages go only to your configured AI provider when you click Send.</p>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

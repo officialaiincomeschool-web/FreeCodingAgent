@@ -1,0 +1,8 @@
+{
+  "name": "river-chat-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.mjs", "test": "node --test test.mjs", "demo": "node demo.mjs" }
+}
