@@ -64,10 +64,11 @@
     </details>
     <details id="projectBox" class="settings">
       <summary>📁 Project folder · agent &amp; saves</summary>
-      <label for="projectPath">YOUR PROJECT FOLDER (FULL PATH)</label>
+      <button id="projectPick" class="pick-button" type="button">📂 Select folder…</button>
+      <label for="projectPath">OR PASTE THE FULL PATH</label>
       <input id="projectPath" type="text" maxlength="1000" placeholder="C:\Users\you\projects\my-app" autocomplete="off" spellcheck="false">
-      <button id="projectUse" class="text-button" type="button">📁 Use this folder</button>
-      <p class="hint" id="projectHint">Paste the full path of your code project. The AI can read files there and propose edits (you approve every change), and 💾 Save buttons write into this folder. Empty + click turns it off.</p>
+      <button id="projectUse" class="text-button" type="button">📁 Use this path</button>
+      <p class="hint" id="projectHint">Click 📂 Select folder to pick your code project on this computer (or paste its path). The AI can read files there and propose edits (you approve every change), and 💾 Save buttons write into this folder. Empty + click turns it off.</p>
     </details>
     <div class="sidebar-bottom">
       <span class="dot"></span> Runs on your computer

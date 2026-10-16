@@ -31,7 +31,7 @@ Keep the terminal running. Ctrl+C stops the server. Do not use VS Code Live Serv
 | Vision | Attach up to 4 PNG/JPEG images per message with the **🖼 Images** button, paste, or drag-and-drop. Images are downscaled in your browser to 1600 px JPEG before sending. |
 | Reasoning | Reasoning models stream their thinking into a collapsible **Thinking** panel. Set **Reasoning effort** per model (`DeepSeek`: none/high/max; `GLM`: low/high/max). |
 | Tools | With **Allow tools** on, the model can call a safe calculator, current time, and Wikipedia lookup. Each call is shown inline with its result; the loop stops after 8 rounds. |
-| Coding agent (project folder) | Under **📁 Project folder**, paste the full path of your project (e.g. `C:\projects\my-app`). The AI then gets file tools: `list_files`, `read_file` and `search_files` run automatically, while `write_file` and `edit_file` pause and show a **diff card with ✓ Apply / ✗ Reject** — nothing is written until you approve. All paths are sandboxed to that folder. |
+| Coding agent (project folder) | Under **📁 Project folder**, click **📂 Select folder** to pick your project in a folder window (or paste the full path, e.g. `C:\projects\my-app`). The AI then gets file tools: `list_files`, `read_file` and `search_files` run automatically, while `write_file` and `edit_file` pause and show a **diff card with ✓ Apply / ✗ Reject** — nothing is written until you approve. All paths are sandboxed to that folder. |
 | Token & cost meter | Every reply shows input/output/reasoning/cached tokens and an estimated cost using River's published per-model prices. |
 | Sampling controls | Temperature (0–2), top P (0–1), stop sequences (up to 4) and a System prompt in **Model & settings**. |
 | Model switching | The model picker is **searchable** — click it and type to filter (full IDs shown for `free/`-style names). Switching models keeps the conversation; use **＋ New conversation** for an independent comparison. The selected model, token limit and tool state are shown under the chat box. **↻ Refresh available models** queries your provider. |
@@ -87,13 +87,14 @@ When a reply contains code, each code block gets a **💾 Save** button. It writ
 
 Turn the chat into a coding agent for one folder:
 
-1. Open **📁 Project folder** in the sidebar, paste the full path of your project (for example `C:\Users\you\projects\my-app`) and click **Use this folder**. The status line under the chat box then shows **agent folder on**.
+1. Open **📁 Project folder** in the sidebar and click **📂 Select folder…** — a real folder window opens on your computer; choose your project (built in on Windows and macOS; on Linux it uses `zenity` if installed). You can also paste the full path (for example `C:\Users\you\projects\my-app`) and click **Use this path**. The status line under the chat box then shows **agent folder on**.
 2. Ask it to do something real: `Find where the API key is read and add a check for empty keys.` The model searches and reads your files on its own.
 3. When it wants to change a file, a **diff card** appears in the reply: green `+` lines are additions, red `−` lines are deletions. Click **✓ Apply** to write the change or **✗ Reject** to refuse it. The model sees the outcome and continues.
 
 Safety, by design:
 
 - The server binds to `127.0.0.1` only, and every path is resolved and checked against the chosen folder — `..`, absolute paths and symlinks cannot escape it.
+- The folder window is opened by the local server on your own machine (a PowerShell dialog on Windows) — the folder is selected by you, and its path never leaves your computer.
 - Reads run automatically; **writes never happen without your click**. Rejecting is always safe.
 - Binary files, huge files and `.git`/`node_modules` are skipped during search; reads refuse binary data.
 - Clearing the field (leave it empty and click **Use this folder**) turns the agent off — file tools and 💾 Save both need a folder.
@@ -104,7 +105,7 @@ River is also a training platform (SFT / RL / distillation) via the Python `rive
 
 ## Verification
 
-`npm test` runs local integration tests against a mock upstream; they do not spend API credits. They cover forwarding, validation (roles, images, sampling params, size limits), the tool loop and its round limit, usage/reasoning passthrough, stream errors, connecting a provider from the page (including bad input and clearing it again), the coding-agent workspace (folder validation, sandbox-escape attempts, read tools, the propose → approve → write flow including rejections, and the 💾 Save endpoint), and blocked private/cross-origin access. A live smoke test (tools + vision) was run manually with a real key.
+`npm test` runs local integration tests against a mock upstream; they do not spend API credits. They cover forwarding, validation (roles, images, sampling params, size limits), the tool loop and its round limit, usage/reasoning passthrough, stream errors, connecting a provider from the page (including bad input and clearing it again), the coding-agent workspace (folder validation, sandbox-escape attempts, read tools, the propose → approve → write flow including rejections, the 💾 Save endpoint, and the folder-picker flow with pick, cancel, busy and non-folder selections), and blocked private/cross-origin access. A live smoke test (tools + vision) was run manually with a real key.
 
 ## Files
 

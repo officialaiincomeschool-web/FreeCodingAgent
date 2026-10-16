@@ -315,7 +315,8 @@ test('coding agent workspace: reads files, proposes edits, needs approval', asyn
     );
   });
   const up = await listen(upstream);
-  const app = createApp({ apiKey: 'test-secret', upstream: up });
+  let pickHandler = () => Promise.resolve(null); // replaced per test; the default pretends the user canceled
+  const app = createApp({ apiKey: 'test-secret', upstream: up, folderPicker: () => pickHandler() });
   const url = await listen(app);
   t.after(() => { for (const s of [app, upstream]) { s.closeAllConnections(); s.close(); } });
 
@@ -441,6 +442,36 @@ test('coding agent workspace: reads files, proposes edits, needs approval', asyn
     assert.equal((await save({ path: '../sneaky.txt', content: 'x' })).status, 400);
     assert.equal((await save({ path: 'saved', content: 'x' })).status, 400);
     assert.equal((await save({ path: 'ok.txt', content: 'x'.repeat(300001) })).status, 400);
+  });
+
+  await t.test('folder picker sets the folder; cancel and a busy picker are handled', async () => {
+    pickHandler = async () => path.join(dir, 'src');
+    const picked = await api('/api/workspace/pick', {});
+    assert.equal(picked.status, 200);
+    const pickedBody = await picked.json();
+    assert.equal(pickedBody.ready, true);
+    assert.equal(pickedBody.root.toLowerCase(), path.join(dir, 'src').toLowerCase());
+    let config = await (await fetch(url + '/api/config')).json();
+    assert.equal(config.workspace.root.toLowerCase(), path.join(dir, 'src').toLowerCase());
+
+    pickHandler = async () => null;
+    const canceled = await api('/api/workspace/pick', {});
+    assert.equal(canceled.status, 200);
+    assert.equal((await canceled.json()).canceled, true);
+    config = await (await fetch(url + '/api/config')).json();
+    assert.equal(config.workspace.root.toLowerCase(), path.join(dir, 'src').toLowerCase(), 'canceling must keep the previous folder');
+
+    let release, started;
+    const startedPromise = new Promise(resolve => { started = resolve; });
+    pickHandler = () => new Promise(resolve => { release = resolve; started(); });
+    const first = api('/api/workspace/pick', {});
+    await startedPromise;
+    const second = await api('/api/workspace/pick', {});
+    assert.equal(second.status, 409);
+    release(path.join(dir, 'hello.js'));
+    assert.equal((await first).status, 400, 'a file cannot become the project folder');
+
+    await api('/api/workspace', { path: dir });
   });
 
   await t.test('clearing the folder turns saves and file tools off', async () => {

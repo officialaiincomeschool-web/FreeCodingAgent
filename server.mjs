@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { readFile, readdir, stat, realpath, mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +28,7 @@ const MAX_IMAGES = 4;                        // per message
 const MAX_TOOL_ROUNDS = 8;
 const REQUEST_TIMEOUT_MS = 300000;
 const APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;   // how long a proposed file change waits for the user
+const FOLDER_PICK_TIMEOUT_MS = 10 * 60 * 1000; // how long the native folder window may stay open
 const READ_MAX_BYTES = 2 * 1024 * 1024;       // read_file refuses anything larger
 const WRITE_MAX_CHARS = 300000;               // write_file / edit_file content cap
 const TOOL_OUTPUT_MAX = 60000;                // characters returned to the model per tool
@@ -189,7 +191,58 @@ function allowedEfforts(model) {
   return [];
 }
 
-export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.river.ai/v1', models } = {}) {
+// Opens a real folder-selection window on the machine running the server, so the user
+// can click a folder instead of typing a path. Canceling resolves null.
+const FOLDER_DIALOG_PS = `
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.Width = 1
+$owner.Height = 1
+$owner.Opacity = 0
+$owner.Show()
+$owner.Activate()
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Select your project folder for the coding agent'
+$dialog.ShowNewFolderButton = $false
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) } else { [Console]::Out.Write('__CANCEL__') }
+$owner.Close()
+`.trim();
+
+function nativeFolderPicker() {
+  const platform = process.platform;
+  const [command, args] = platform === 'win32'
+    ? ['powershell.exe', ['-STA', '-NoProfile', '-EncodedCommand', Buffer.from(FOLDER_DIALOG_PS, 'utf16le').toString('base64')]]
+    : platform === 'darwin'
+      ? ['osascript', ['-e', 'POSIX path of (choose folder with prompt "Select your project folder for the coding agent")']]
+      : ['zenity', ['--file-selection', '--directory', '--title=Select your project folder']];
+  return new Promise((resolve, reject) => {
+    let child;
+    try { child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch { return reject(new Error('Could not open a folder window on this computer. Type the path instead.')); }
+    child.stderr.resume();
+    let out = '';
+    const timer = setTimeout(() => { child.kill(); resolve(null); }, FOLDER_PICK_TIMEOUT_MS);
+    child.stdout.on('data', chunk => { out += String(chunk); });
+    child.on('error', () => {
+      clearTimeout(timer);
+      reject(new Error(platform === 'linux' ? 'No folder window is available (install zenity, or type the path instead).' : 'Could not open a folder window. Type the path instead.'));
+    });
+    child.on('close', code => {
+      clearTimeout(timer);
+      const value = out.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1) || '';
+      if (value === '__CANCEL__' || !value) {
+        if (platform === 'win32' && !value && code !== 0) return reject(new Error('Could not open a folder window. Type the path instead.'));
+        return resolve(null);
+      }
+      resolve(value);
+    });
+  });
+}
+
+export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.river.ai/v1', models, folderPicker } = {}) {
   const base = String(upstream).replace(/\/+$/, '');
   const modelList = models ?? (envModels.length ? envModels : (base.includes('river.ai') ? defaults : []));
   const provider = { streamUsage: true };
@@ -197,6 +250,19 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
   let workspace = null; // { root, label } — project folder for the coding agent, set via POST /api/workspace
   const pendingApprovals = new Map(); // id -> { signal, resolve } for proposed file changes
   const active = () => uiProvider ?? { base, key: apiKey };
+  const pickFolder = typeof folderPicker === 'function' ? folderPicker : nativeFolderPicker;
+  let pickingFolder = false; // true while the native folder window is open
+
+  async function useFolder(folder) {
+    if (folder.length > 1000 || folder.includes('\0')) throw new Error('That folder path is not valid.');
+    let info;
+    try { info = await stat(folder); } catch { throw new Error('That folder does not exist. Pick it again or copy the full path from your file explorer.'); }
+    if (!info.isDirectory()) throw new Error('That path is a file, not a folder. Point to the folder that holds your project.');
+    let real;
+    try { real = await realpath(folder); } catch { throw new Error('Could not open that folder.'); }
+    workspace = { root: real, label: folder };
+    return folder;
+  }
 
   function waitForApproval(id, signal) {
     return new Promise(resolve => {
@@ -340,7 +406,7 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
       models: modelList, pricing: PRICING, tools: BUILTIN_TOOLS.map(t => t.function.name),
       workspace: workspace ? { ready: true, root: workspace.label } : { ready: false, root: null }
     });
-    if (!['/api/chat', '/api/models', '/api/provider', '/api/workspace', '/api/workspace/approval', '/api/workspace/save'].includes(url.pathname)) return json(res, 404, { error: 'Not found' });
+    if (!['/api/chat', '/api/models', '/api/provider', '/api/workspace', '/api/workspace/approval', '/api/workspace/save', '/api/workspace/pick'].includes(url.pathname)) return json(res, 404, { error: 'Not found' });
     const validMethod = (req.method === 'POST' && url.pathname !== '/api/models') || (req.method === 'GET' && url.pathname === '/api/models');
     if (!validMethod) return json(res, 405, { error: 'Method not allowed' });
 
@@ -379,13 +445,8 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
       catch (e) { return json(res, e.tooLarge ? 413 : 400, { error: e.message }); }
       const folder = typeof payload.path === 'string' ? payload.path.trim() : '';
       if (!folder) { workspace = null; return json(res, 200, { ready: false, root: null }); }
-      if (folder.length > 1000 || folder.includes('\0')) return json(res, 400, { error: 'That folder path is not valid.' });
-      let info;
-      try { info = await stat(folder); } catch { return json(res, 400, { error: 'That folder does not exist. Copy the full path from your file explorer.' }); }
-      if (!info.isDirectory()) return json(res, 400, { error: 'That path is a file, not a folder. Point to the folder that holds your project.' });
-      let real;
-      try { real = await realpath(folder); } catch { return json(res, 400, { error: 'Could not open that folder.' }); }
-      workspace = { root: real, label: folder };
+      try { await useFolder(folder); }
+      catch (e) { return json(res, 400, { error: e.message }); }
       return json(res, 200, { ready: true, root: folder });
     }
 
@@ -422,6 +483,24 @@ export function createApp({ apiKey = envKey, upstream = envBase || 'https://api.
         await writeFile(abs, payload.content, 'utf8');
       } catch { return json(res, 400, { error: 'Could not write that file. Check the folder path.' }); }
       return json(res, 200, { saved: rel });
+    }
+
+    if (url.pathname === '/api/workspace/pick') {
+      if (!req.headers['content-type']?.includes('application/json')) return json(res, 415, { error: 'Send JSON.' });
+      try { await readJsonBody(req, 65536); }
+      catch (e) { return json(res, e.tooLarge ? 413 : 400, { error: e.message }); }
+      if (pickingFolder) return json(res, 409, { error: 'A folder window is already open on this computer. Finish or cancel it first.' });
+      pickingFolder = true;
+      try {
+        let picked = null;
+        try { picked = await pickFolder(); }
+        catch (e) { return json(res, 500, { error: e?.message || 'Could not open a folder window.' }); }
+        if (!picked) return json(res, 200, { canceled: true, ready: Boolean(workspace), root: workspace?.label ?? null });
+        const folder = String(picked).trim();
+        try { await useFolder(folder); }
+        catch (e) { return json(res, 400, { error: e.message }); }
+        return json(res, 200, { ready: true, root: folder });
+      } finally { pickingFolder = false; }
     }
 
     if (!uiProvider && !envReady) return json(res, 503, { error: 'No API key yet. Open Model & settings in the page and connect your provider, or set API_KEY in .env.' });

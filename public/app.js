@@ -567,10 +567,10 @@ document.addEventListener('scroll', () => { if (!$('modelMenu').hidden) position
 // ---- project folder (coding agent) ----
 
 function updateWorkspaceUI() {
-  $('projectUse').textContent = workspace.ready ? '✓ Folder in use · change or clear' : '📁 Use this folder';
+  $('projectUse').textContent = workspace.ready ? '✓ Folder in use · change or clear' : '📁 Use this path';
   $('projectHint').textContent = workspace.ready
     ? 'Agent mode is ON for ' + workspace.root + '. The AI can read files there, every change needs your approval, and 💾 Save writes into this folder.'
-    : 'Paste the full path of your code project. The AI can read files there and propose edits (you approve every change), and 💾 Save buttons write into this folder. Empty + click turns it off.';
+    : 'Click 📂 Select folder to pick your code project on this computer (or paste its path). The AI reads files there and proposes edits you approve, and 💾 Save writes into this folder. Empty + click turns it off.';
   updateModelLine();
 }
 $('projectUse').onclick = async () => {
@@ -584,6 +584,21 @@ $('projectUse').onclick = async () => {
     notice(data.ready ? 'Agent folder set: ' + data.root + ' — the AI can read this folder, and every change needs your approval.' : 'Agent folder cleared. The AI can no longer touch your files.');
   } catch (e) { notice(e.message); }
   finally { $('projectUse').disabled = false; }
+};
+$('projectPick').onclick = async () => {
+  $('projectPick').disabled = true;
+  const original = $('projectPick').textContent;
+  $('projectPick').textContent = '📂 Waiting for the folder window…';
+  try {
+    const data = await readJSON(await fetch('/api/workspace/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }));
+    if (data.canceled) { notice('Folder selection canceled.'); return; }
+    workspace = { ready: data.ready, root: data.root ?? null };
+    $('projectPath').value = data.root ?? '';
+    try { localStorage.setItem(LS_WORKSPACE, data.root); } catch { /* ignore */ }
+    updateWorkspaceUI();
+    notice('Agent folder set: ' + data.root + ' — the AI can read this folder, and every change needs your approval.');
+  } catch (e) { notice(e.message); }
+  finally { $('projectPick').disabled = false; $('projectPick').textContent = original; }
 };
 for (const [id, key] of [['temperature', 'temperature'], ['top_p', 'top_p'], ['stop', 'stop'], ['systemPrompt', 'systemPrompt']]) {
   $(id).addEventListener('input', () => { settings[key] = $(id).value.trim(); persist(); });

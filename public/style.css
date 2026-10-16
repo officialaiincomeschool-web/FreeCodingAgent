@@ -108,6 +108,9 @@ select:focus,input[type=number]:focus,input[type=text]:focus{outline:none;border
 .settings .check .hint{margin:0}
 .text-button{border:0;background:none;color:var(--teal);padding:8px 0;font-size:12.5px;text-align:left}
 .text-button:hover{color:#9be8dd}
+.pick-button{display:block;width:100%;text-align:center;border:1px solid rgba(111,216,201,.45);background:rgba(111,216,201,.09);color:var(--teal);border-radius:10px;padding:9px 12px;font-size:12.5px;font-weight:600;transition:background .15s,border-color .15s}
+.pick-button:hover{background:rgba(111,216,201,.16);border-color:rgba(111,216,201,.65)}
+.pick-button:disabled{opacity:.6;cursor:default}
 .hint{color:var(--muted);font-size:11px;margin:8px 0 0}
 
 .sidebar-bottom{flex:none;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px;margin-top:8px}
