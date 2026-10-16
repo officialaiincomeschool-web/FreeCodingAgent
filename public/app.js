@@ -440,7 +440,15 @@ function fillModels(models) {
   const select = $('model');
   const keep = select.value || activeChat()?.model || '';
   const all = [...new Set([...models, ...(keep ? [keep] : [])])];
-  select.replaceChildren(...all.map(id => { const option = document.createElement('option'); option.value = id; option.textContent = shortName(id); option.title = id; return option; }));
+  const count = new Map();
+  for (const id of all) { const short = shortName(id); count.set(short, (count.get(short) || 0) + 1); }
+  select.replaceChildren(...all.map(id => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = count.get(shortName(id)) > 1 ? id : shortName(id);
+    option.title = id;
+    return option;
+  }));
   select.value = all.includes(keep) ? keep : (all[0] ?? '');
   updateEffort();
 }
