@@ -12,8 +12,9 @@ A dark navy, amber and teal chat interface powered by any OpenAI-compatible API.
 
 ## Quick start — clone this repository and run it
 
-1. Install **Node.js 22 or newer** from https://nodejs.org/ if needed. Restart VS Code after installation. Check `node --version` in its terminal.
-2. **Clone this repository** (or use the green **Code → Download ZIP** button on GitHub) and enter the folder:
+**The only prerequisite is Node.js 22 or newer** — install it from https://nodejs.org/ if you don't have it, restart VS Code, and check `node --version`. Nothing else to install: no packages, no dependencies, no build step.
+
+1. **Clone this repository** (or use the green **Code → Download ZIP** button on GitHub) and enter the folder:
 
    ```powershell
    git clone https://github.com/officialaiincomeschool-web/FreeCodingAgent.git
@@ -21,15 +22,15 @@ A dark navy, amber and teal chat interface powered by any OpenAI-compatible API.
    ```
 
    In VS Code choose **File → Open Folder** and open the cloned `FreeCodingAgent` folder — the one containing `package.json`.
-3. Open **Terminal → New Terminal** and start the app:
+2. Open **Terminal → New Terminal** and start the app:
 
    ```powershell
    npm start
    ```
 
-   No `npm install` is needed: the app uses only Node's built-in libraries. If Windows blocks `npm.ps1`, use `npm.cmd start` or `node server.mjs`.
+   If Windows blocks `npm.ps1`, use `npm.cmd start` or `node server.mjs`.
 
-4. Open **http://127.0.0.1:3000** in your browser. In **Model & settings** enter your provider's **base URL** (it usually ends in `/v1`) and **API key**, then click **⚡ Connect & load models**. Pick a model from the dropdown and chat — the key is saved only in your browser.
+3. Open **http://127.0.0.1:3000** in your browser. In **Model & settings** enter your provider's **base URL** (it usually ends in `/v1`) and **API key**, then click **⚡ Connect & load models**. Pick a model from the dropdown and chat — the key is saved only in your browser.
 
    Prefer file-based configuration (or a machine you can't type into)? Copy `.env.example` to `.env`, fill in `BASE_URL`, `API_KEY` and optional `MODELS`, restart the server, and the page connects automatically. Existing terminal environment variables take precedence over `.env`, and `.env` is ignored by Git.
 
