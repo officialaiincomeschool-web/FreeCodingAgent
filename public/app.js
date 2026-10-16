@@ -589,6 +589,7 @@ $('projectPick').onclick = async () => {
   $('projectPick').disabled = true;
   const original = $('projectPick').textContent;
   $('projectPick').textContent = '📂 Waiting for the folder window…';
+  notice('A folder window is opening on your computer — if you do not see it, check your taskbar.');
   try {
     const data = await readJSON(await fetch('/api/workspace/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }));
     if (data.canceled) { notice('Folder selection canceled.'); return; }

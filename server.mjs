@@ -193,39 +193,86 @@ function allowedEfforts(model) {
 
 // Opens a real folder-selection window on the machine running the server, so the user
 // can click a folder instead of typing a path. Canceling resolves null.
+// The dialog is raised above other windows and focused as soon as it appears: background
+// processes are not allowed to steal focus, so it must force itself to the front.
+// It cannot rely on MainWindowHandle (that returns 0 for this dialog) — the window is
+// located by its dialog class (#32770) instead.
 const FOLDER_DIALOG_PS = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
-$owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true
-$owner.ShowInTaskbar = $false
-$owner.Width = 1
-$owner.Height = 1
-$owner.Opacity = 0
-$owner.Show()
-$owner.Activate()
+Add-Type -Namespace Native -Name Win32 -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, System.IntPtr lParam);
+public delegate bool EnumWindowsProc(System.IntPtr hWnd, System.IntPtr lParam);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint lpdwProcessId);
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hWnd);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr hWnd, System.IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(System.IntPtr hWnd);
+'@
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Select your project folder for the coding agent'
 $dialog.ShowNewFolderButton = $false
-if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) } else { [Console]::Out.Write('__CANCEL__') }
-$owner.Close()
+$script:tries = 0
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 200
+$timer.Add_Tick({
+  $timer.Stop()
+  $script:tries++
+  $script:found = [System.IntPtr]::Zero
+  $cb = [Native.Win32+EnumWindowsProc]{
+    param([System.IntPtr]$hWnd, [System.IntPtr]$lParam)
+    [uint32]$windowPid = 0
+    [Native.Win32]::GetWindowThreadProcessId($hWnd, [ref]$windowPid) | Out-Null
+    if ($windowPid -eq $PID -and [Native.Win32]::IsWindowVisible($hWnd)) {
+      $name = New-Object System.Text.StringBuilder 64
+      [Native.Win32]::GetClassName($hWnd, $name, 64) | Out-Null
+      if ($name.ToString() -eq '#32770') { $script:found = $hWnd; return $false }
+    }
+    return $true
+  }
+  [Native.Win32]::EnumWindows($cb, [System.IntPtr]::Zero) | Out-Null
+  if ($script:found.ToInt64() -ne 0) {
+    $fg = [Native.Win32]::GetForegroundWindow()
+    [uint32]$fgPid = 0
+    $fgThread = [Native.Win32]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+    $myThread = [Native.Win32]::GetCurrentThreadId()
+    $attached = $false
+    if ($fgThread -ne 0 -and $fgThread -ne $myThread) { $attached = [Native.Win32]::AttachThreadInput($myThread, $fgThread, $true) }
+    [Native.Win32]::ShowWindow($script:found, 9) | Out-Null
+    [Native.Win32]::SetWindowPos($script:found, [System.IntPtr]::new(-1), 0, 0, 0, 0, 0x43) | Out-Null
+    [Native.Win32]::BringWindowToTop($script:found) | Out-Null
+    [Native.Win32]::SetForegroundWindow($script:found) | Out-Null
+    if ($attached) { [Native.Win32]::AttachThreadInput($myThread, $fgThread, $false) | Out-Null }
+  } elseif ($script:tries -lt 50) {
+    $timer.Start()
+  }
+})
+$timer.Start()
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) } else { [Console]::Out.Write('__CANCEL__') }
 `.trim();
 
 function nativeFolderPicker() {
   const platform = process.platform;
   const [command, args] = platform === 'win32'
-    ? ['powershell.exe', ['-STA', '-NoProfile', '-EncodedCommand', Buffer.from(FOLDER_DIALOG_PS, 'utf16le').toString('base64')]]
+    ? ['powershell.exe', ['-STA', '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(FOLDER_DIALOG_PS, 'utf16le').toString('base64')]]
     : platform === 'darwin'
       ? ['osascript', ['-e', 'POSIX path of (choose folder with prompt "Select your project folder for the coding agent")']]
       : ['zenity', ['--file-selection', '--directory', '--title=Select your project folder']];
   return new Promise((resolve, reject) => {
     let child;
-    try { child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch { return reject(new Error('Could not open a folder window on this computer. Type the path instead.')); }
-    child.stderr.resume();
     let out = '';
+    let err = '';
     const timer = setTimeout(() => { child.kill(); resolve(null); }, FOLDER_PICK_TIMEOUT_MS);
+    const lastErrorLine = () => err.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1) || '';
     child.stdout.on('data', chunk => { out += String(chunk); });
+    child.stderr.on('data', chunk => { err = (err + String(chunk)).slice(-2000); });
     child.on('error', () => {
       clearTimeout(timer);
       reject(new Error(platform === 'linux' ? 'No folder window is available (install zenity, or type the path instead).' : 'Could not open a folder window. Type the path instead.'));
@@ -234,7 +281,10 @@ function nativeFolderPicker() {
       clearTimeout(timer);
       const value = out.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1) || '';
       if (value === '__CANCEL__' || !value) {
-        if (platform === 'win32' && !value && code !== 0) return reject(new Error('Could not open a folder window. Type the path instead.'));
+        if (platform === 'win32' && !value && code !== 0 && code !== null) {
+          const detail = lastErrorLine();
+          return reject(new Error('The folder window failed to open' + (detail ? ': ' + detail.slice(0, 200) : '. Type the path instead.')));
+        }
         return resolve(null);
       }
       resolve(value);

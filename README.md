@@ -94,7 +94,7 @@ Turn the chat into a coding agent for one folder:
 Safety, by design:
 
 - The server binds to `127.0.0.1` only, and every path is resolved and checked against the chosen folder — `..`, absolute paths and symlinks cannot escape it.
-- The folder window is opened by the local server on your own machine (a PowerShell dialog on Windows) — the folder is selected by you, and its path never leaves your computer.
+- The folder window is opened by the local server on your own machine (a PowerShell dialog on Windows) and pops up in front of the page — the folder is selected by you, and its path never leaves your computer.
 - Reads run automatically; **writes never happen without your click**. Rejecting is always safe.
 - Binary files, huge files and `.git`/`node_modules` are skipped during search; reads refuse binary data.
 - Clearing the field (leave it empty and click **Use this folder**) turns the agent off — file tools and 💾 Save both need a folder.
