@@ -28,8 +28,17 @@
       <input id="providerKey" type="password" maxlength="500" placeholder="Kept in this browser only" autocomplete="off">
       <button id="connect" class="text-button" type="button">⚡ Connect &amp; load models</button>
       <p class="hint" id="providerHint">Enter your provider’s base URL and API key. Saved in this browser only.</p>
-      <label for="model">MODEL</label>
-      <select id="model"></select>
+      <label for="modelButton">MODEL</label>
+      <div id="modelPicker" class="picker">
+        <button id="modelButton" class="picker-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+          <span id="modelLabel">Loading models…</span>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>
+        </button>
+      </div>
+      <div id="modelMenu" class="picker-menu" hidden>
+        <input id="modelSearch" type="text" placeholder="Search models…" autocomplete="off" spellcheck="false" aria-label="Search models">
+        <div id="modelList" class="picker-list" role="listbox" aria-label="Models"></div>
+      </div>
       <button id="refresh" class="text-button" type="button">↻ Refresh available models</button>
       <div id="effortBox">
         <label for="effort">REASONING EFFORT</label>

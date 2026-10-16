@@ -33,7 +33,7 @@ Keep the terminal running. Ctrl+C stops the server. Do not use VS Code Live Serv
 | Tools | With **Allow tools** on, the model can call a safe calculator, current time, and Wikipedia lookup. Each call is shown inline with its result; the loop stops after 5 rounds. |
 | Token & cost meter | Every reply shows input/output/reasoning/cached tokens and an estimated cost using River's published per-model prices. |
 | Sampling controls | Temperature (0–2), top P (0–1), stop sequences (up to 4) and a System prompt in **Model & settings**. |
-| Model switching | Switching models keeps the conversation; use **＋ New conversation** for an independent comparison. The selected model, token limit and tool state are shown under the chat box. **↻ Refresh available models** queries your provider. |
+| Model switching | The model picker is **searchable** — click it and type to filter (full IDs shown for `free/`-style names). Switching models keeps the conversation; use **＋ New conversation** for an independent comparison. The selected model, token limit and tool state are shown under the chat box. **↻ Refresh available models** queries your provider. |
 | Save code to a folder | In Chrome/Edge, choose a folder once; the **💾 Save** button under each code block writes that file straight into the folder (subfolders like `src/app.js` supported; overwriting asks first). |
 
 ## First tests

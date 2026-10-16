@@ -14,6 +14,8 @@ let outputDir = null;
 let folderGranted = false;
 let providerConfig = { baseUrl: '', apiKey: '' };
 let connection = { ready: false, source: null, baseUrl: null };
+let models = [];
+let currentModel = '';
 
 const shortName = id => String(id || '').split('/').pop();
 const activeChat = () => state.chats.find(c => c.id === state.activeId) ?? state.chats[0];
@@ -22,7 +24,7 @@ function scroll(force) {
   const conversation = $('conversation');
   if (force || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 260) conversation.scrollTop = conversation.scrollHeight;
 }
-function setBusy(b) { busy = b; for (const id of ['send', 'newChat', 'model', 'tokens', 'refresh', 'effort', 'attach']) $(id).disabled = b; $('stop').hidden = !b; }
+function setBusy(b) { busy = b; for (const id of ['send', 'newChat', 'modelButton', 'tokens', 'refresh', 'effort', 'attach']) $(id).disabled = b; $('stop').hidden = !b; }
 function readJSON(response) { return response.json().then(data => { if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`); return data; }); }
 const safeHost = url => { try { return new URL(url).host; } catch { return String(url || ''); } };
 function updateProviderUI() {
@@ -36,7 +38,7 @@ function updateConnectionUI() {
 }
 function updateModelLine() {
   const bits = [];
-  const model = $('model').value || activeChat()?.model;
+  const model = currentModel || activeChat()?.model;
   if (model) bits.push(model);
   if ($('tokens').value) bits.push($('tokens').value + ' max tokens');
   if ($('tools').checked) bits.push('tools on');
@@ -48,7 +50,7 @@ function updateModelLine() {
 // ---- persistence ----
 
 function newChatRecord() {
-  return { id: crypto.randomUUID(), title: 'New conversation', model: $('model')?.value || '', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+  return { id: crypto.randomUUID(), title: 'New conversation', model: currentModel || '', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
 }
 function loadAll() {
   try {
@@ -282,8 +284,8 @@ function openChat(id) {
   setMenu(false);
   state.activeId = id;
   const chat = activeChat();
-  if (chat.model && [...$('model').options].some(option => option.value === chat.model)) $('model').value = chat.model;
-  else if (!chat.model) chat.model = $('model').value;
+  if (chat.model && models.includes(chat.model)) { currentModel = chat.model; updateModelButton(); }
+  else if (!chat.model) chat.model = currentModel;
   updateEffort(); persist(); renderMessages(); renderChatList();
   $('prompt').focus();
 }
@@ -428,7 +430,7 @@ function effortChoices(model) {
   return [];
 }
 function updateEffort() {
-  const choices = effortChoices($('model').value);
+  const choices = effortChoices(currentModel);
   $('effortBox').hidden = choices.length === 0;
   const previous = $('effort').value;
   $('effort').replaceChildren(...choices.map(([value, label]) => { const option = document.createElement('option'); option.value = value; option.textContent = label; return option; }));
@@ -436,20 +438,12 @@ function updateEffort() {
   $('effort').value = wanted ?? '';
   updateModelLine();
 }
-function fillModels(models) {
-  const select = $('model');
-  const keep = select.value || activeChat()?.model || '';
-  const all = [...new Set([...models, ...(keep ? [keep] : [])])];
-  const count = new Map();
-  for (const id of all) { const short = shortName(id); count.set(short, (count.get(short) || 0) + 1); }
-  select.replaceChildren(...all.map(id => {
-    const option = document.createElement('option');
-    option.value = id;
-    option.textContent = count.get(shortName(id)) > 1 ? id : shortName(id);
-    option.title = id;
-    return option;
-  }));
-  select.value = all.includes(keep) ? keep : (all[0] ?? '');
+function fillModels(list) {
+  const keep = currentModel || activeChat()?.model || '';
+  models = [...new Set([...list, ...(keep ? [keep] : [])])];
+  currentModel = models.includes(keep) ? keep : (models[0] ?? '');
+  updateModelButton();
+  if (!$('modelMenu').hidden) renderModelMenu($('modelSearch').value);
   updateEffort();
 }
 function hydrateSettings() {
@@ -460,12 +454,96 @@ function hydrateSettings() {
   $('systemPrompt').value = settings.systemPrompt ?? '';
 }
 
-$('model').addEventListener('change', () => {
+function commitModel(id) {
   const chat = activeChat();
-  chat.model = $('model').value;
+  chat.model = id;
   chat.updatedAt = Date.now();
   updateEffort(); persist(); renderChatList();
+}
+
+// ---- searchable model picker ----
+
+function updateModelButton() {
+  $('modelLabel').textContent = currentModel ? shortName(currentModel) : (models.length ? 'Select a model' : 'No models — connect a provider');
+  $('modelButton').title = currentModel || '';
+}
+function renderModelMenu(filter) {
+  const list = $('modelList');
+  const query = String(filter || '').trim().toLowerCase();
+  const visible = models.filter(id => !query || id.toLowerCase().includes(query));
+  list.replaceChildren();
+  if (!visible.length) {
+    const empty = document.createElement('div'); empty.className = 'picker-empty';
+    empty.textContent = models.length ? 'No model matches that search.' : 'No models loaded — click ↻ Refresh available models.';
+    list.append(empty);
+    return;
+  }
+  for (const id of visible) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'picker-item' + (id === currentModel ? ' active' : '');
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', id === currentModel ? 'true' : 'false');
+    item.dataset.id = id;
+    const name = document.createElement('span'); name.textContent = shortName(id);
+    item.append(name);
+    if (shortName(id) !== id) { const sub = document.createElement('small'); sub.textContent = id; item.append(sub); }
+    item.onclick = () => chooseModel(id);
+    list.append(item);
+  }
+}
+function positionModelMenu() {
+  const rect = $('modelButton').getBoundingClientRect();
+  const menu = $('modelMenu');
+  const width = Math.max(rect.width, 230);
+  menu.style.width = width + 'px';
+  const height = menu.offsetHeight || 320;
+  let top = rect.bottom + 6;
+  if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - 6 - height);
+  menu.style.top = top + 'px';
+  menu.style.left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)) + 'px';
+}
+function openModelMenu() {
+  $('modelMenu').hidden = false;
+  renderModelMenu('');
+  $('modelSearch').value = '';
+  positionModelMenu();
+  $('modelButton').setAttribute('aria-expanded', 'true');
+  $('modelSearch').focus();
+}
+function closeModelMenu() {
+  if ($('modelMenu').hidden) return;
+  $('modelMenu').hidden = true;
+  $('modelButton').setAttribute('aria-expanded', 'false');
+}
+function chooseModel(id) {
+  closeModelMenu();
+  $('modelButton').focus();
+  if (!id || id === currentModel) return;
+  currentModel = id;
+  updateModelButton();
+  commitModel(id);
+}
+$('modelButton').onclick = () => ($('modelMenu').hidden ? openModelMenu() : closeModelMenu());
+$('modelSearch').addEventListener('input', () => renderModelMenu($('modelSearch').value));
+$('modelSearch').addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    const first = $('modelList').querySelector('.picker-item');
+    if (first) chooseModel(first.dataset.id);
+  } else if (event.key === 'ArrowDown') {
+    const first = $('modelList').querySelector('.picker-item');
+    if (first) { event.preventDefault(); first.focus(); }
+  }
 });
+$('modelList').addEventListener('keydown', event => {
+  const items = [...$('modelList').querySelectorAll('.picker-item')];
+  const index = items.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown' && index >= 0 && index < items.length - 1) { event.preventDefault(); items[index + 1].focus(); }
+  else if (event.key === 'ArrowUp' && index >= 0) { event.preventDefault(); index === 0 ? $('modelSearch').focus() : items[index - 1].focus(); }
+});
+document.addEventListener('pointerdown', event => { if (!$('modelMenu').hidden && !event.target.closest('#modelMenu, #modelButton')) closeModelMenu(); });
+window.addEventListener('resize', () => { if (!$('modelMenu').hidden) positionModelMenu(); });
+document.addEventListener('scroll', () => { if (!$('modelMenu').hidden) positionModelMenu(); }, true);
 for (const [id, key] of [['temperature', 'temperature'], ['top_p', 'top_p'], ['stop', 'stop'], ['systemPrompt', 'systemPrompt']]) {
   $(id).addEventListener('input', () => { settings[key] = $(id).value.trim(); persist(); });
 }
@@ -501,7 +579,7 @@ $('newChat').onclick = () => {
   if (busy) return;
   setMenu(false);
   const chat = newChatRecord();
-  if (!chat.model) chat.model = $('model').value;
+  if (!chat.model) chat.model = currentModel;
   state.chats.unshift(chat); state.activeId = chat.id;
   persist(); renderAll(); notice(''); $('prompt').focus();
 };
@@ -552,7 +630,7 @@ $('form').onsubmit = async event => {
   refs.card.classList.add('generating');
   scroll(true);
 
-  const body = { model: chat.model || $('model').value, messages: outgoing, max_tokens: Number($('tokens').value), tools: $('tools').checked };
+  const body = { model: chat.model || currentModel, messages: outgoing, max_tokens: Number($('tokens').value), tools: $('tools').checked };
   const temperature = parseFloat($('temperature').value);
   if (!Number.isNaN(temperature)) body.temperature = temperature;
   const top_p = parseFloat($('top_p').value);
@@ -642,14 +720,15 @@ hydrateSettings();
 $('baseUrl').value = providerConfig.baseUrl;
 $('providerKey').value = providerConfig.apiKey;
 renderAll();
+document.body.append($('modelMenu')); // escapes the sidebar's scroll clipping for the dropdown
 
 // ---- app shell: drawer, scroll-to-bottom, composer ----
 
-function setMenu(open) { document.body.classList.toggle('menu-open', open); }
+function setMenu(open) { document.body.classList.toggle('menu-open', open); if (!open) closeModelMenu(); }
 $('menu').onclick = () => setMenu(true);
 $('closeMenu').onclick = () => setMenu(false);
 $('overlay').onclick = () => setMenu(false);
-document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenu(false); });
+document.addEventListener('keydown', event => { if (event.key === 'Escape') { setMenu(false); closeModelMenu(); } });
 
 const conversationEl = $('conversation');
 conversationEl.addEventListener('scroll', () => { $('toBottom').hidden = conversationEl.scrollHeight - conversationEl.scrollTop - conversationEl.clientHeight < 320; });
@@ -692,7 +771,7 @@ fetch('/api/config').then(readJSON).then(async data => {
   }
   updateProviderUI(); updateConnectionUI();
   if (!data.models.length && connection.ready) $('refresh').click();
-  if (!activeChat().model) { activeChat().model = $('model').value; persist(); }
+  if (!activeChat().model) { activeChat().model = currentModel; persist(); }
   if (!connection.ready) notice('Connect your provider under Model & settings to start chatting.');
 }).catch(() => {
   notice('Start this app with npm start and open the local URL. Do not open index.html directly.');
